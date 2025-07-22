@@ -11,7 +11,6 @@ import (
 // Registration constants
 const (
 	DefaultRegistrationTimeout = 60 * time.Second
-	CapabilityProtocolVersion  = "302"
 	UserModeVisible            = "0"
 	UserServerWildcard         = "*"
 )
