@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -72,7 +73,7 @@ func (pm *PlainMechanism) Start() (string, error) {
 	return encoded, nil
 }
 
-func (pm *PlainMechanism) Next(challenge string) (string, error) {
+func (pm *PlainMechanism) Next(string) (string, error) {
 	return "", fmt.Errorf("PLAIN mechanism does not support challenges")
 }
 
@@ -104,9 +105,12 @@ type SASLHandler struct {
 	mechsMux       sync.RWMutex
 
 	maxChunkSize int
+
+	username string
+	password string
 }
 
-func NewSASLHandler(ctx context.Context, connection *Connection, eventBus *EventBus) *SASLHandler {
+func NewSASLHandler(ctx context.Context, connection *Connection, eventBus *EventBus, username, password string) *SASLHandler {
 	ctx, cancel := context.WithCancel(ctx)
 
 	h := &SASLHandler{
@@ -117,14 +121,16 @@ func NewSASLHandler(ctx context.Context, connection *Connection, eventBus *Event
 		state:        SASLStateInactive,
 		timeout:      DefaultSASLTimeout,
 		maxChunkSize: DefaultSASLChunkSize,
+		username:     username,
+		password:     password,
 	}
 
-	eventBus.Subscribe(EventCapLS, h.HandleCapLS)
-	eventBus.Subscribe(EventCapACK, h.HandleCapACK)
-	eventBus.Subscribe(EventCapNAK, h.HandleCapNAK)
+	slog.Debug("Creating SASL handler", "username", username, "has_password", password != "")
 	eventBus.Subscribe(EventSASLAuth, h.HandleAuthenticate)
 	eventBus.Subscribe(EventSASLSuccess, h.HandleSASLSuccess)
 	eventBus.Subscribe(EventSASLFail, h.HandleSASLFail)
+	eventBus.Subscribe(EventCapPreEnd, h.handleSasl)
+	slog.Debug("SASL handler subscribed to events")
 	return h
 }
 
@@ -289,82 +295,67 @@ func (sh *SASLHandler) stopTimeout() {
 	}
 }
 
-func (sh *SASLHandler) HandleCapLS(event *Event) {
-	if event.Message == nil {
+func (sh *SASLHandler) handleSasl(event *Event) {
+	slog.Debug("Starting SASL")
+	capPreEndData, ok := event.Data.(*CapPreEndData)
+	if !ok {
+		slog.Error("Incorrect event type", "type", event.Data)
+		sh.eventBus.SignalCoordination("cap-pre-end")
+		return
+	}
+	if !slices.Contains(capPreEndData.ActiveCaps, "sasl") {
+		slog.Error("SASL required but not supported by server")
+		sh.eventBus.Emit(&Event{
+			Type: EventError,
+			Data: &ErrorData{
+				Message: "SASL required but not supported by server",
+			},
+		})
+		sh.eventBus.SignalCoordination("cap-pre-end")
 		return
 	}
 
-	capsStr := event.Message.GetTrailing()
-	caps := strings.Fields(capsStr)
-
-	for _, cap := range caps {
-		if strings.HasPrefix(cap, "sasl=") {
-			mechsStr := strings.TrimPrefix(cap, "sasl=")
-			mechs := strings.Split(mechsStr, ",")
-			sh.setAvailableMechanisms(mechs)
-			slog.Info("SASL mechanisms available from server", "mechanisms", mechs)
-			break
-		} else if cap == "sasl" {
-			sh.setAvailableMechanisms([]string{"PLAIN"})
-			slog.Info("SASL capability available from server", "default_mechanism", "PLAIN")
-			break
-		}
+	// Parse SASL mechanisms from capability value
+	if saslValue, exists := capPreEndData.CapValues["sasl"]; exists && saslValue != "" {
+		mechanisms := strings.Split(saslValue, ",")
+		sh.setAvailableMechanisms(mechanisms)
+		slog.Info("SASL mechanisms available", "mechanisms", mechanisms)
+	} else {
+		// Default to PLAIN if no mechanisms specified
+		sh.setAvailableMechanisms([]string{"PLAIN"})
+		slog.Info("SASL capability present but no mechanisms specified, defaulting to PLAIN")
 	}
-}
 
-func (sh *SASLHandler) HandleCapACK(event *Event) {
-	if event.Message == nil {
+	if sh.username == "" && sh.password == "" {
+		slog.Error("No username and password specified")
+		sh.eventBus.SignalCoordination("cap-pre-end")
 		return
 	}
 
-	capsStr := event.Message.GetTrailing()
-	caps := strings.Fields(capsStr)
-
-	for _, cap := range caps {
-		if cap == "sasl" {
-			config := sh.connection.GetConfig()
-			if config.SASLUser != "" && config.SASLPass != "" {
-				// Try to start PLAIN SASL authentication
-				if err := sh.startPlainAuthentication(config); err != nil {
-					sh.eventBus.Emit(&Event{
-						Type: EventSASLFail,
-						Data: &SASLData{
-							Mechanism: "unknown",
-							Data:      fmt.Sprintf("failed to start SASL: %v", err),
-						},
-					})
-				}
-			}
-			break
-		}
-	}
-}
-
-func (sh *SASLHandler) HandleCapNAK(event *Event) {
-	if event.Message == nil {
+	// Start authentication (non-blocking)
+	if err := sh.startPlainAuthentication(); err != nil {
+		sh.eventBus.Emit(&Event{
+			Type: EventSASLFail,
+			Data: &SASLData{
+				Mechanism: "unknown",
+				Data:      fmt.Sprintf("failed to start SASL: %v", err),
+			},
+		})
+		sh.eventBus.SignalCoordination("cap-pre-end")
 		return
 	}
 
-	capsStr := event.Message.GetTrailing()
-	caps := strings.Fields(capsStr)
-
-	for _, cap := range caps {
-		if cap == "sasl" {
-			sh.setState(SASLStateFailed)
-			sh.eventBus.Emit(&Event{
-				Type: EventSASLFail,
-				Data: &SASLData{
-					Mechanism: "unknown",
-					Data:      "sasl capability not acknowledged",
-				},
-			})
-			break
-		}
-	}
+	slog.Debug("SASL authentication started")
 }
 
 func (sh *SASLHandler) HandleAuthenticate(event *Event) {
-	if event.Message == nil || sh.GetState() != SASLStateRequesting {
+	slog.Debug("HandleAuthenticate called", "state", sh.GetState(), "has_message", event.Message != nil)
+	if event.Message == nil {
+		slog.Warn("AUTHENTICATE event has no message")
+		return
+	}
+	if sh.GetState() != SASLStateRequesting {
+		slog.Warn("AUTHENTICATE received in wrong state", "current_state", sh.GetState(), "expected_state", "requesting")
 		return
 	}
 
@@ -452,6 +443,9 @@ func (sh *SASLHandler) HandleSASLSuccess(event *Event) {
 			},
 		})
 	}
+
+	// Signal that SASL authentication is complete
+	sh.eventBus.SignalCoordination("cap-pre-end")
 }
 
 func (sh *SASLHandler) HandleSASLFail(event *Event) {
@@ -481,6 +475,9 @@ func (sh *SASLHandler) HandleSASLFail(event *Event) {
 			Data:      reason,
 		},
 	})
+
+	// Signal that SASL authentication is complete (even though it failed)
+	sh.eventBus.SignalCoordination("cap-pre-end")
 }
 
 func (sh *SASLHandler) Reset() {
@@ -512,18 +509,18 @@ func (sh *SASLHandler) SetMaxChunkSize(size int) {
 }
 
 // startPlainAuthentication starts PLAIN SASL authentication if supported
-func (sh *SASLHandler) startPlainAuthentication(config *ConnectionConfig) error {
+func (sh *SASLHandler) startPlainAuthentication() error {
 	if !sh.SupportsPlain() {
 		return fmt.Errorf("PLAIN mechanism not supported by server")
 	}
 
-	if config.SASLUser == "" || config.SASLPass == "" {
+	if sh.username == "" || sh.password == "" {
 		return fmt.Errorf("username and password required for PLAIN authentication")
 	}
 
 	mechanism := &PlainMechanism{
-		username: config.SASLUser,
-		password: config.SASLPass,
+		username: sh.username,
+		password: sh.password,
 	}
 	sh.SetMechanism(mechanism)
 	return sh.StartAuthentication()

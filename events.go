@@ -85,6 +85,9 @@ const (
 	EventCapNAK       EventType = "cap_nak"
 	EventCapDEL       EventType = "cap_del"
 	EventCapNEW       EventType = "cap_new"
+	EventCapAdded     EventType = "cap_added"
+	EventCapRemoved   EventType = "cap_removed"
+	EventCapPreEnd    EventType = "cap_pre_end"
 	EventSASLAuth     EventType = "sasl_auth"
 	EventSASLSuccess  EventType = "sasl_success"
 	EventSASLFail     EventType = "sasl_fail"
@@ -135,6 +138,10 @@ type EventBus struct {
 	wg       sync.WaitGroup
 	nextID   int
 	idMutex  sync.Mutex
+
+	// Coordination channels for handlers that need to signal completion
+	coordinationMux sync.RWMutex
+	coordChannels   map[string]chan struct{}
 }
 
 func NewEventBus(ctx context.Context) *EventBus {
@@ -142,10 +149,11 @@ func NewEventBus(ctx context.Context) *EventBus {
 	ctx, cancel := context.WithCancel(ctx)
 
 	bus := &EventBus{
-		handlers: make(map[EventType][]handlerWrapper),
-		ctx:      ctx,
-		cancel:   cancel,
-		eventCh:  make(chan *Event, DefaultEventChannelBuffer),
+		handlers:      make(map[EventType][]handlerWrapper),
+		ctx:           ctx,
+		cancel:        cancel,
+		eventCh:       make(chan *Event, DefaultEventChannelBuffer),
+		coordChannels: make(map[string]chan struct{}),
 	}
 
 	bus.wg.Add(1)
@@ -258,6 +266,43 @@ func (eb *EventBus) EmitSync(event *Event) {
 	eb.dispatchEvent(event)
 }
 
+func (eb *EventBus) EmitAndWait(event *Event) {
+	slog.Debug("Emitting event and waiting for handlers", "event_type", event.Type)
+
+	eb.mutex.RLock()
+	handlers, exists := eb.handlers[event.Type]
+	if !exists {
+		eb.mutex.RUnlock()
+		return
+	}
+
+	handlersCopy := make([]handlerWrapper, len(handlers))
+	copy(handlersCopy, handlers)
+	eb.mutex.RUnlock()
+
+	var wg sync.WaitGroup
+	wg.Add(len(handlersCopy))
+
+	slog.Debug("Dispatching to handlers and waiting", "event_type", event.Type, "handler_count", len(handlersCopy))
+
+	for _, wrapper := range handlersCopy {
+		go func(w handlerWrapper) {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					buf := make([]byte, PanicStackBufferSize)
+					n := runtime.Stack(buf, false)
+					slog.Error("Event handler panic", "event_type", event.Type, "handler_id", w.id, "panic", r, "stack_trace", string(buf[:n]))
+				}
+			}()
+			w.handler(event)
+		}(wrapper)
+	}
+
+	wg.Wait()
+	slog.Debug("All handlers completed", "event_type", event.Type)
+}
+
 func (eb *EventBus) Close() {
 	slog.Debug("Closing event bus")
 	eb.cancel()
@@ -268,6 +313,46 @@ func (eb *EventBus) Close() {
 
 func (eb *EventBus) Wait() {
 	eb.wg.Wait()
+}
+
+// CreateCoordination creates a coordination channel for handlers to signal completion
+func (eb *EventBus) CreateCoordination(name string) <-chan struct{} {
+	eb.coordinationMux.Lock()
+	defer eb.coordinationMux.Unlock()
+
+	ch := make(chan struct{})
+	eb.coordChannels[name] = ch
+	slog.Debug("Created coordination channel", "name", name)
+	return ch
+}
+
+// SignalCoordination signals that a handler has completed its work
+func (eb *EventBus) SignalCoordination(name string) {
+	eb.coordinationMux.Lock()
+	defer eb.coordinationMux.Unlock()
+
+	if ch, exists := eb.coordChannels[name]; exists {
+		select {
+		case ch <- struct{}{}:
+			slog.Debug("Coordination signal sent", "name", name)
+		default:
+			slog.Warn("Coordination channel full, signal dropped", "name", name)
+		}
+	} else {
+		slog.Warn("Coordination channel does not exist", "name", name)
+	}
+}
+
+// RemoveCoordination removes a coordination channel
+func (eb *EventBus) RemoveCoordination(name string) {
+	eb.coordinationMux.Lock()
+	defer eb.coordinationMux.Unlock()
+
+	if ch, exists := eb.coordChannels[name]; exists {
+		close(ch)
+		delete(eb.coordChannels, name)
+		slog.Debug("Removed coordination channel", "name", name)
+	}
 }
 
 func DetermineEventType(msg *Message) []EventType {
@@ -370,6 +455,19 @@ type ErrorData struct {
 type CapData struct {
 	Subcommand string
 	Caps       []string
+}
+
+type CapAddedData struct {
+	Capability string
+}
+
+type CapRemovedData struct {
+	Capability string
+}
+
+type CapPreEndData struct {
+	ActiveCaps []string
+	CapValues  map[string]string
 }
 
 type SASLData struct {
