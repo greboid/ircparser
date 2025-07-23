@@ -44,10 +44,6 @@ type Connection struct {
 	capabilities map[string]string
 	capMux       sync.RWMutex
 
-	lastPing time.Time
-	lastPong time.Time
-	pingMux  sync.RWMutex
-
 	isupport    map[string]string
 	isupportMux sync.RWMutex
 }
@@ -57,15 +53,12 @@ func NewConnection(ctx context.Context, config *ConnectionConfig, eventBus *Even
 	ctx, cancel := context.WithCancel(ctx)
 
 	return &Connection{
-		config:       config,
-		state:        StateDisconnected,
-		eventBus:     eventBus,
-		ctx:          ctx,
-		cancel:       cancel,
-		capabilities: make(map[string]string),
-		isupport:     make(map[string]string),
-		lastPing:     time.Now(),
-		lastPong:     time.Now(),
+		config:   config,
+		state:    StateDisconnected,
+		eventBus: eventBus,
+		ctx:      ctx,
+		cancel:   cancel,
+		isupport: make(map[string]string),
 	}
 }
 
@@ -267,9 +260,6 @@ func (c *Connection) handleMessage(msg *Message) {
 		c.parseISUPPORT(msg)
 		slog.Debug("Parsed ISUPPORT", "feature_count", len(c.isupport))
 
-	case "CAP":
-		c.handleCapability(msg)
-
 	case "NICK":
 		oldNick := extractNick(msg.Source)
 		newNick := msg.GetParam(0)
@@ -302,57 +292,6 @@ func (c *Connection) parseISUPPORT(msg *Message) {
 		}
 	}
 	slog.Debug("ISUPPORT parsed", "host", c.config.Host, "feature_count", len(c.isupport))
-}
-
-func (c *Connection) handleCapability(msg *Message) {
-	if len(msg.Params) < 2 {
-		slog.Warn("Invalid CAP message", "host", c.config.Host, "params", msg.Params)
-		return
-	}
-
-	subcommand := msg.Params[1]
-	var caps []string
-
-	if len(msg.Params) > 2 {
-		capsStr := msg.GetTrailing()
-		caps = strings.Fields(capsStr)
-	}
-
-	slog.Debug("Handling capability", "host", c.config.Host, "subcommand", subcommand, "caps", caps)
-
-	c.capMux.Lock()
-	switch subcommand {
-	case "LS":
-		for _, capability := range caps {
-			if strings.Contains(capability, "=") {
-				parts := strings.SplitN(capability, "=", 2)
-				c.capabilities[parts[0]] = parts[1]
-			} else {
-				c.capabilities[capability] = ""
-			}
-		}
-		slog.Debug("Capabilities listed", "host", c.config.Host, "count", len(c.capabilities))
-	case "ACK":
-		slog.Debug("Capabilities acknowledged", "host", c.config.Host, "caps", caps)
-	case "NAK":
-		slog.Debug("Capabilities rejected", "host", c.config.Host, "caps", caps)
-	case "DEL":
-		for _, capability := range caps {
-			delete(c.capabilities, capability)
-		}
-		slog.Debug("Capabilities deleted", "host", c.config.Host, "caps", caps)
-	case "NEW":
-		for _, capability := range caps {
-			if strings.Contains(capability, "=") {
-				parts := strings.SplitN(capability, "=", 2)
-				c.capabilities[parts[0]] = parts[1]
-			} else {
-				c.capabilities[capability] = ""
-			}
-		}
-		slog.Debug("New capabilities added", "host", c.config.Host, "caps", caps)
-	}
-	c.capMux.Unlock()
 }
 
 func (c *Connection) SendRaw(line string) error {
@@ -443,25 +382,6 @@ func (c *Connection) GetCurrentNick() string {
 	return c.currentNick
 }
 
-func (c *Connection) GetCapabilities() map[string]string {
-	c.capMux.RLock()
-	defer c.capMux.RUnlock()
-
-	caps := make(map[string]string)
-	for k, v := range c.capabilities {
-		caps[k] = v
-	}
-	return caps
-}
-
-func (c *Connection) HasCapability(cap string) bool {
-	c.capMux.RLock()
-	defer c.capMux.RUnlock()
-
-	_, exists := c.capabilities[cap]
-	return exists
-}
-
 func (c *Connection) GetISupport() map[string]string {
 	c.isupportMux.RLock()
 	defer c.isupportMux.RUnlock()
@@ -476,18 +396,6 @@ func (c *Connection) GetISupportValue(key string) string {
 	defer c.isupportMux.RUnlock()
 
 	return c.isupport[key]
-}
-
-func (c *Connection) GetLastPing() time.Time {
-	c.pingMux.RLock()
-	defer c.pingMux.RUnlock()
-	return c.lastPing
-}
-
-func (c *Connection) GetLastPong() time.Time {
-	c.pingMux.RLock()
-	defer c.pingMux.RUnlock()
-	return c.lastPong
 }
 
 func (c *Connection) GetServerName() string {

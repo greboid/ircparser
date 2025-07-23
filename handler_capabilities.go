@@ -21,8 +21,6 @@ type CapabilitiesHandler struct {
 	requestedCaps []string
 	pendingCaps   map[string]bool
 	pendingMux    sync.RWMutex
-	activeCaps    map[string]bool
-	activeCapsMux sync.RWMutex
 	capValues     map[string]string
 	capValuesMux  sync.RWMutex
 
@@ -40,7 +38,6 @@ func NewCapabilitiesHandler(ctx context.Context, connection *Connection, eventBu
 		cancel:        cancel,
 		requestedCaps: caps,
 		pendingCaps:   make(map[string]bool),
-		activeCaps:    make(map[string]bool),
 		capValues:     make(map[string]string),
 	}
 
@@ -109,15 +106,15 @@ func (ch *CapabilitiesHandler) HandleCapACK(event *Event) {
 
 	slog.Info("Server acknowledged capabilities", "capabilities", ackedCaps)
 
-	for _, cap := range ackedCaps {
-		ch.addCapability(cap)
-		ch.removePendingCapability(cap)
+	for _, capability := range ackedCaps {
+		ch.addCapability(capability)
+		ch.removePendingCapability(capability)
 
 		// Emit cap added event
 		ch.eventBus.Emit(&Event{
 			Type: EventCapAdded,
 			Data: &CapAddedData{
-				Capability: cap,
+				Capability: capability,
 			},
 			Time: time.Now(),
 		})
@@ -143,8 +140,8 @@ func (ch *CapabilitiesHandler) HandleCapNAK(event *Event) {
 	slog.Warn("Server rejected capabilities", "capabilities", nakedCaps)
 
 	// Remove rejected capabilities from pending
-	for _, cap := range nakedCaps {
-		ch.removePendingCapability(cap)
+	for _, capability := range nakedCaps {
+		ch.removePendingCapability(capability)
 	}
 
 	// Check if we can end negotiation
@@ -162,14 +159,14 @@ func (ch *CapabilitiesHandler) HandleCapDEL(event *Event) {
 
 	slog.Info("Server removed capabilities", "capabilities", removedCaps)
 
-	for _, cap := range removedCaps {
-		ch.removeCapability(cap)
+	for _, capability := range removedCaps {
+		ch.removeCapability(capability)
 
 		// Emit cap removed event
 		ch.eventBus.Emit(&Event{
 			Type: EventCapRemoved,
 			Data: &CapRemovedData{
-				Capability: cap,
+				Capability: capability,
 			},
 			Time: time.Now(),
 		})
@@ -198,8 +195,8 @@ func (ch *CapabilitiesHandler) RequestCapabilities(capabilities []string) error 
 
 	// Mark all capabilities as pending
 	ch.pendingMux.Lock()
-	for _, cap := range capabilities {
-		ch.pendingCaps[cap] = true
+	for _, capability := range capabilities {
+		ch.pendingCaps[capability] = true
 	}
 	ch.pendingMux.Unlock()
 
@@ -273,33 +270,36 @@ func (ch *CapabilitiesHandler) EndCapabilityNegotiation() error {
 }
 
 func (ch *CapabilitiesHandler) IsCapabilityActive(capability string) bool {
-	ch.activeCapsMux.RLock()
-	defer ch.activeCapsMux.RUnlock()
-	return ch.activeCaps[capability]
+	ch.capValuesMux.RLock()
+	defer ch.capValuesMux.RUnlock()
+	_, exists := ch.capValues[capability]
+	return exists
 }
 
 func (ch *CapabilitiesHandler) GetActiveCaps() []string {
-	ch.activeCapsMux.RLock()
-	defer ch.activeCapsMux.RUnlock()
+	ch.capValuesMux.RLock()
+	defer ch.capValuesMux.RUnlock()
 
-	caps := make([]string, 0, len(ch.activeCaps))
-	for cap := range ch.activeCaps {
-		caps = append(caps, cap)
+	caps := make([]string, 0, len(ch.capValues))
+	for capability := range ch.capValues {
+		caps = append(caps, capability)
 	}
 	return caps
 }
 
 func (ch *CapabilitiesHandler) addCapability(capability string) {
-	ch.activeCapsMux.Lock()
-	defer ch.activeCapsMux.Unlock()
-	ch.activeCaps[capability] = true
+	ch.capValuesMux.Lock()
+	defer ch.capValuesMux.Unlock()
+	if _, exists := ch.capValues[capability]; !exists {
+		ch.capValues[capability] = ""
+	}
 	slog.Debug("Added capability", "capability", capability)
 }
 
 func (ch *CapabilitiesHandler) removeCapability(capability string) {
-	ch.activeCapsMux.Lock()
-	defer ch.activeCapsMux.Unlock()
-	delete(ch.activeCaps, capability)
+	ch.capValuesMux.Lock()
+	defer ch.capValuesMux.Unlock()
+	delete(ch.capValues, capability)
 	slog.Debug("Removed capability", "capability", capability)
 }
 
@@ -339,9 +339,9 @@ func (ch *CapabilitiesHandler) setNegotiating(negotiating bool) {
 }
 
 func (ch *CapabilitiesHandler) Reset() {
-	ch.activeCapsMux.Lock()
-	ch.activeCaps = make(map[string]bool)
-	ch.activeCapsMux.Unlock()
+	ch.capValuesMux.Lock()
+	ch.capValues = make(map[string]string)
+	ch.capValuesMux.Unlock()
 
 	ch.setNegotiating(false)
 	slog.Debug("CapabilitiesHandler reset")
@@ -352,16 +352,16 @@ func (ch *CapabilitiesHandler) parseCapabilityValues(capsStr string) {
 	defer ch.capValuesMux.Unlock()
 
 	caps := strings.Fields(capsStr)
-	for _, cap := range caps {
-		if strings.Contains(cap, "=") {
-			parts := strings.SplitN(cap, "=", 2)
+	for _, capability := range caps {
+		if strings.Contains(capability, "=") {
+			parts := strings.SplitN(capability, "=", 2)
 			if len(parts) == 2 {
 				ch.capValues[parts[0]] = parts[1]
 				slog.Debug("Parsed capability with value", "capability", parts[0], "value", parts[1])
 			}
 		} else {
-			ch.capValues[cap] = ""
-			slog.Debug("Parsed capability without value", "capability", cap)
+			ch.capValues[capability] = ""
+			slog.Debug("Parsed capability without value", "capability", capability)
 		}
 	}
 }
@@ -371,8 +371,8 @@ func (ch *CapabilitiesHandler) getCapabilityValues() map[string]string {
 	defer ch.capValuesMux.RUnlock()
 
 	values := make(map[string]string, len(ch.capValues))
-	for cap, value := range ch.capValues {
-		values[cap] = value
+	for capability, value := range ch.capValues {
+		values[capability] = value
 	}
 	return values
 }

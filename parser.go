@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"time"
 )
 
 const (
@@ -13,11 +12,12 @@ const (
 )
 
 type Parser struct {
-	connection *Connection
-	eventBus   *EventBus
-	ctx        context.Context
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
+	connection   *Connection
+	eventBus     *EventBus
+	ctx          context.Context
+	cancel       context.CancelFunc
+	wg           sync.WaitGroup
+	capabilities map[string]string
 }
 
 func NewParser(ctx context.Context, config *ConnectionConfig) *Parser {
@@ -28,10 +28,11 @@ func NewParser(ctx context.Context, config *ConnectionConfig) *Parser {
 	connection := NewConnection(ctx, config, eventBus)
 
 	parser := &Parser{
-		connection: connection,
-		eventBus:   eventBus,
-		ctx:        ctx,
-		cancel:     cancel,
+		connection:   connection,
+		eventBus:     eventBus,
+		ctx:          ctx,
+		cancel:       cancel,
+		capabilities: make(map[string]string),
 	}
 
 	if config.SASLUser != "" && config.SASLPass != "" {
@@ -142,7 +143,8 @@ func (p *Parser) Privmsg(target, message string) error {
 		slog.Error("Failed to send privmsg", "target", target, "error", err)
 		return err
 	}
-	if !p.connection.HasCapability("echo-message") {
+
+	if _, ok := p.capabilities["echo-message"]; !ok {
 		p.generateFakeEcho("PRIVMSG", target, message)
 	}
 
@@ -160,7 +162,7 @@ func (p *Parser) Notice(target, message string) error {
 		slog.Error("Failed to send notice", "target", target, "error", err)
 		return err
 	}
-	if !p.connection.HasCapability("echo-message") {
+	if _, ok := p.capabilities["echo-message"]; !ok {
 		p.generateFakeEcho("NOTICE", target, message)
 	}
 
@@ -288,14 +290,6 @@ func (p *Parser) GetCurrentNick() string {
 	return p.connection.GetCurrentNick()
 }
 
-func (p *Parser) GetCapabilities() map[string]string {
-	return p.connection.GetCapabilities()
-}
-
-func (p *Parser) HasCapability(cap string) bool {
-	return p.connection.HasCapability(cap)
-}
-
 func (p *Parser) GetISupport() map[string]string {
 	return p.connection.GetISupport()
 }
@@ -323,12 +317,4 @@ func (p *Parser) UnsubscribeByID(eventType EventType, id int) {
 func (p *Parser) Wait() {
 	p.wg.Wait()
 	p.connection.Wait()
-}
-
-func (p *Parser) GetLastPing() time.Time {
-	return p.connection.GetLastPing()
-}
-
-func (p *Parser) GetLastPong() time.Time {
-	return p.connection.GetLastPong()
 }
