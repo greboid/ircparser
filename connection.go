@@ -41,9 +41,6 @@ type Connection struct {
 	currentNick string
 	nickMux     sync.RWMutex
 
-	capabilities map[string]string
-	capMux       sync.RWMutex
-
 	isupport    map[string]string
 	isupportMux sync.RWMutex
 }

@@ -28,7 +28,7 @@ type CapabilitiesHandler struct {
 	negotiatingMux sync.RWMutex
 }
 
-func NewCapabilitiesHandler(ctx context.Context, connection *Connection, eventBus *EventBus, caps ...string) *CapabilitiesHandler {
+func NewCapabilitiesHandler(ctx context.Context, connection *Connection, eventBus *EventBus, capabilities map[string]string, caps ...string) *CapabilitiesHandler {
 	ctx, cancel := context.WithCancel(ctx)
 
 	h := &CapabilitiesHandler{
@@ -38,7 +38,7 @@ func NewCapabilitiesHandler(ctx context.Context, connection *Connection, eventBu
 		cancel:        cancel,
 		requestedCaps: caps,
 		pendingCaps:   make(map[string]bool),
-		capValues:     make(map[string]string),
+		capValues:     capabilities,
 	}
 
 	eventBus.Subscribe(EventConnected, h.HandleConnected)
