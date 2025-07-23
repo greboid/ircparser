@@ -39,8 +39,8 @@ func NewParser(ctx context.Context, config *ConnectionConfig) *Parser {
 		NewSASLHandler(ctx, connection, eventBus, config.SASLUser, config.SASLPass)
 	}
 	NewCapabilitiesHandler(ctx, connection, eventBus, parser.capabilities, "sasl", "echo-message")
-	NewRegistrationHandler(ctx, connection, eventBus)
-	NewPingHandler(ctx, connection, eventBus)
+	NewRegistrationHandler(ctx, connection.config, connection.Send, eventBus.Subscribe, eventBus.Emit)
+	NewPingHandler(ctx, connection.Send, eventBus.Subscribe, eventBus.Emit)
 
 	slog.Debug("Parser created successfully")
 	return parser

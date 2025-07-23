@@ -8,27 +8,27 @@ import (
 )
 
 type PingHandler struct {
-	connection   *Connection
-	eventBus     *EventBus
+	send         func(command string, params ...string) error
+	emit         func(event *Event)
 	ctx          context.Context
 	cancel       context.CancelFunc
 	lastResponse time.Time
 	pingTimer    *time.Timer
 }
 
-func NewPingHandler(ctx context.Context, connection *Connection, eventBus *EventBus) *PingHandler {
+func NewPingHandler(ctx context.Context, send func(command string, params ...string) error, subscribe func(EventType, EventHandler) int, emit func(event *Event)) *PingHandler {
 	ctx, cancel := context.WithCancel(ctx)
 
 	h := &PingHandler{
-		connection: connection,
-		eventBus:   eventBus,
-		ctx:        ctx,
-		cancel:     cancel,
+		send:   send,
+		emit:   emit,
+		ctx:    ctx,
+		cancel: cancel,
 	}
 
-	eventBus.Subscribe(EventPing, h.HandlePing)
-	eventBus.Subscribe(EventRawIncoming, h.HandleRaw)
-	eventBus.Subscribe(EventRegistered, h.HandleWelcome)
+	subscribe(EventPing, h.HandlePing)
+	subscribe(EventRawIncoming, h.HandleRaw)
+	subscribe(EventRegistered, h.HandleWelcome)
 	return h
 }
 
@@ -39,9 +39,15 @@ func (h *PingHandler) HandleWelcome(*Event) {
 }
 
 func (h *PingHandler) SendPing() {
-	err := h.connection.Send("PING", fmt.Sprintf("tithon-%s", time.Now().Format("060102150405")))
+	err := h.send("PING", fmt.Sprintf("tithon-%s", time.Now().Format("060102150405")))
 	if err != nil {
-		slog.Error("Failed to send PONG response", "error", err)
+		slog.Error("Failed to send PING", "error", err)
+		h.emit(&Event{
+			Type: EventError,
+			Data: &ErrorData{
+				Message: fmt.Sprintf("Failed to send ping: %s", err),
+			},
+		})
 	}
 }
 
@@ -58,8 +64,14 @@ func (h *PingHandler) HandlePing(event *Event) {
 	if !ok {
 		return
 	}
-	err := h.connection.Send("PONG", pingData.Server)
+	err := h.send("PONG", pingData.Server)
 	if err != nil {
 		slog.Error("Failed to send PONG response", "error", err, "server", pingData.Server)
+		h.emit(&Event{
+			Type: EventError,
+			Data: &ErrorData{
+				Message: fmt.Sprintf("Failed to send ping: %s", err),
+			},
+		})
 	}
 }

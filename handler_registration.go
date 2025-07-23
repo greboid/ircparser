@@ -40,10 +40,12 @@ func (rs RegistrationState) String() string {
 }
 
 type RegistrationHandler struct {
-	connection *Connection
-	eventBus   *EventBus
-	ctx        context.Context
-	cancel     context.CancelFunc
+	send   func(command string, params ...string) error
+	emit   func(event *Event)
+	config *ConnectionConfig
+
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	state    RegistrationState
 	stateMux sync.RWMutex
@@ -56,20 +58,21 @@ type RegistrationHandler struct {
 	timerMux sync.Mutex
 }
 
-func NewRegistrationHandler(ctx context.Context, connection *Connection, eventBus *EventBus) *RegistrationHandler {
+func NewRegistrationHandler(ctx context.Context, config *ConnectionConfig, send func(command string, params ...string) error, subscribe func(EventType, EventHandler) int, emit func(event *Event)) *RegistrationHandler {
 	slog.Debug("Creating new registration handler", "timeout", DefaultRegistrationTimeout)
 	ctx, cancel := context.WithCancel(ctx)
 
 	h := &RegistrationHandler{
-		connection: connection,
-		eventBus:   eventBus,
-		ctx:        ctx,
-		cancel:     cancel,
-		state:      RegStateInactive,
-		timeout:    DefaultRegistrationTimeout,
+		send:    send,
+		emit:    emit,
+		config:  config,
+		ctx:     ctx,
+		cancel:  cancel,
+		state:   RegStateInactive,
+		timeout: DefaultRegistrationTimeout,
 	}
-	eventBus.Subscribe(EventConnected, h.HandleConnected)
-	eventBus.Subscribe(EventRegistered, h.HandleWelcome)
+	subscribe(EventConnected, h.HandleConnected)
+	subscribe(EventRegistered, h.HandleWelcome)
 	return h
 }
 
@@ -115,15 +118,14 @@ func (rh *RegistrationHandler) Start() error {
 }
 
 func (rh *RegistrationHandler) sendRegistrationCommands() {
-	config := rh.connection.GetConfig()
-	slog.Info("Sending IRC registration commands", "nick", config.Nick, "username", config.Username, "has_password", config.Password != "")
+	slog.Info("Sending IRC registration commands", "nick", rh.config.Nick, "username", rh.config.Username, "has_password", rh.config.Password != "")
 
-	if config.Password != "" {
-		rh.connection.Send("PASS", config.Password)
+	if rh.config.Password != "" {
+		rh.send("PASS", rh.config.Password)
 	}
 
-	rh.connection.Send("NICK", config.Nick)
-	rh.connection.Send("USER", config.Username, UserModeVisible, UserServerWildcard, config.Realname)
+	rh.send("NICK", rh.config.Nick)
+	rh.send("USER", rh.config.Username, UserModeVisible, UserServerWildcard, rh.config.Realname)
 }
 
 func (rh *RegistrationHandler) startTimeout() {
@@ -136,7 +138,7 @@ func (rh *RegistrationHandler) startTimeout() {
 
 	rh.timer = time.AfterFunc(rh.timeout, func() {
 		rh.setState(RegStateFailed)
-		rh.eventBus.Emit(&Event{
+		rh.emit(&Event{
 			Type: EventError,
 			Data: &ErrorData{
 				Message: "registration timeout",
@@ -161,18 +163,17 @@ func (rh *RegistrationHandler) HandleConnected(*Event) {
 	}
 }
 
-func (rh *RegistrationHandler) HandleWelcome(*Event) {
+func (rh *RegistrationHandler) HandleWelcome(event *Event) {
 	if !rh.IsActive() {
 		return
 	}
 
 	rh.setState(RegStateComplete)
 	rh.stopTimeout()
-
-	rh.eventBus.Emit(&Event{
+	rh.emit(&Event{
 		Type: EventRegistered,
 		Data: &ConnectedData{
-			ServerName: rh.connection.GetServerName(),
+			ServerName: event.Message.Source,
 		},
 	})
 }
