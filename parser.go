@@ -34,17 +34,12 @@ func NewParser(ctx context.Context, config *ConnectionConfig) *Parser {
 		cancel:     cancel,
 	}
 
-	// Create handlers in dependency order
-	saslHandler := NewSASLHandler(ctx, connection, eventBus, config.SASLUser, config.SASLPass)
-	capHandler := NewCapabilitiesHandler(ctx, connection, eventBus, "sasl", "echo-message")
-	regHandler := NewRegistrationHandler(ctx, connection, eventBus)
-	pingHandler := NewPingHandler(ctx, connection, eventBus)
-
-	// Store handlers to prevent garbage collection
-	_ = saslHandler
-	_ = capHandler
-	_ = regHandler
-	_ = pingHandler
+	if config.SASLUser != "" && config.SASLPass != "" {
+		NewSASLHandler(ctx, connection, eventBus, config.SASLUser, config.SASLPass)
+	}
+	NewCapabilitiesHandler(ctx, connection, eventBus, "sasl", "echo-message")
+	NewRegistrationHandler(ctx, connection, eventBus)
+	NewPingHandler(ctx, connection, eventBus)
 
 	slog.Debug("Parser created successfully")
 	return parser
