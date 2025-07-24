@@ -13,10 +13,13 @@ const (
 )
 
 type CapabilitiesHandler struct {
-	connection *Connection
-	eventBus   *EventBus
-	ctx        context.Context
-	cancel     context.CancelFunc
+	send        func(command string, params ...string) error
+	subscribe   func(EventType, EventHandler) int
+	emit        func(event *Event)
+	createCoord func(name string) <-chan struct{}
+	removeCoord func(name string)
+	ctx         context.Context
+	cancel      context.CancelFunc
 
 	requestedCaps []string
 	pendingCaps   map[string]bool
@@ -28,12 +31,23 @@ type CapabilitiesHandler struct {
 	negotiatingMux sync.RWMutex
 }
 
-func NewCapabilitiesHandler(ctx context.Context, connection *Connection, eventBus *EventBus, capabilities map[string]string, caps ...string) *CapabilitiesHandler {
+func NewCapabilitiesHandler(
+	ctx context.Context,
+	send func(command string, params ...string) error,
+	subscribe func(EventType, EventHandler) int,
+	emit func(event *Event),
+	createCoord func(name string) <-chan struct{},
+	removeCoord func(name string),
+	capabilities map[string]string, caps ...string,
+) *CapabilitiesHandler {
 	ctx, cancel := context.WithCancel(ctx)
 
 	h := &CapabilitiesHandler{
-		connection:    connection,
-		eventBus:      eventBus,
+		send:          send,
+		emit:          emit,
+		subscribe:     subscribe,
+		removeCoord:   removeCoord,
+		createCoord:   createCoord,
 		ctx:           ctx,
 		cancel:        cancel,
 		requestedCaps: caps,
@@ -41,12 +55,12 @@ func NewCapabilitiesHandler(ctx context.Context, connection *Connection, eventBu
 		capValues:     capabilities,
 	}
 
-	eventBus.Subscribe(EventConnected, h.HandleConnected)
-	eventBus.Subscribe(EventCapLS, h.HandleCapLS)
-	eventBus.Subscribe(EventCapACK, h.HandleCapACK)
-	eventBus.Subscribe(EventCapNAK, h.HandleCapNAK)
-	eventBus.Subscribe(EventCapDEL, h.HandleCapDEL)
-	eventBus.Subscribe(EventCapNEW, h.HandleCapNEW)
+	subscribe(EventConnected, h.HandleConnected)
+	subscribe(EventCapLS, h.HandleCapLS)
+	subscribe(EventCapACK, h.HandleCapACK)
+	subscribe(EventCapNAK, h.HandleCapNAK)
+	subscribe(EventCapDEL, h.HandleCapDEL)
+	subscribe(EventCapNEW, h.HandleCapNEW)
 
 	return h
 }
@@ -56,7 +70,7 @@ func (ch *CapabilitiesHandler) HandleConnected(*Event) {
 
 	ch.setNegotiating(true)
 
-	err := ch.connection.Send("CAP", "LS", DefaultCapabilityProtocolVersion)
+	err := ch.send("CAP", "LS", DefaultCapabilityProtocolVersion)
 	if err != nil {
 		slog.Error("Failed to send CAP LS", "error", err)
 		ch.setNegotiating(false)
@@ -111,7 +125,7 @@ func (ch *CapabilitiesHandler) HandleCapACK(event *Event) {
 		ch.removePendingCapability(capability)
 
 		// Emit cap added event
-		ch.eventBus.Emit(&Event{
+		ch.emit(&Event{
 			Type: EventCapAdded,
 			Data: &CapAddedData{
 				Capability: capability,
@@ -163,7 +177,7 @@ func (ch *CapabilitiesHandler) HandleCapDEL(event *Event) {
 		ch.removeCapability(capability)
 
 		// Emit cap removed event
-		ch.eventBus.Emit(&Event{
+		ch.emit(&Event{
 			Type: EventCapRemoved,
 			Data: &CapRemovedData{
 				Capability: capability,
@@ -201,7 +215,7 @@ func (ch *CapabilitiesHandler) RequestCapabilities(capabilities []string) error 
 	ch.pendingMux.Unlock()
 
 	capString := strings.Join(capabilities, " ")
-	err := ch.connection.Send("CAP", "REQ", capString)
+	err := ch.send("CAP", "REQ", capString)
 	if err != nil {
 		slog.Error("Failed to request capabilities", "capabilities", capabilities, "error", err)
 		return err
@@ -224,7 +238,7 @@ func (ch *CapabilitiesHandler) EndCapabilityNegotiation() error {
 	capValues := ch.getCapabilityValues()
 
 	// Create coordination channel for handlers that need to complete before CAP END
-	coordCh := ch.eventBus.CreateCoordination("cap-pre-end")
+	coordCh := ch.createCoord("cap-pre-end")
 
 	// Emit pre-end event for handlers
 	preEndEvent := &Event{
@@ -237,11 +251,11 @@ func (ch *CapabilitiesHandler) EndCapabilityNegotiation() error {
 	}
 
 	slog.Debug("Emitting pre-cap-end event")
-	ch.eventBus.Emit(preEndEvent)
+	ch.emit(preEndEvent)
 
 	// Wait for handlers asynchronously to avoid blocking the event bus
 	go func() {
-		defer ch.eventBus.RemoveCoordination("cap-pre-end")
+		defer ch.removeCoord("cap-pre-end")
 
 		// Wait for handlers that need to complete (e.g., SASL authentication)
 		// Use a reasonable timeout to avoid hanging indefinitely
@@ -256,7 +270,7 @@ func (ch *CapabilitiesHandler) EndCapabilityNegotiation() error {
 		}
 
 		// Now send CAP END
-		err := ch.connection.Send("CAP", "END")
+		err := ch.send("CAP", "END")
 		if err != nil {
 			slog.Error("Failed to send CAP END", "error", err)
 			return

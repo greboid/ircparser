@@ -38,7 +38,8 @@ func NewParser(ctx context.Context, config *ConnectionConfig) *Parser {
 	if config.SASLUser != "" && config.SASLPass != "" {
 		NewSASLHandler(ctx, connection, eventBus, config.SASLUser, config.SASLPass)
 	}
-	NewCapabilitiesHandler(ctx, connection, eventBus, parser.capabilities, "sasl", "echo-message")
+	NewCapabilitiesHandler(ctx, connection.Send, eventBus.Subscribe, eventBus.Emit, eventBus.CreateCoordination,
+		eventBus.RemoveCoordination, parser.capabilities, "sasl", "echo-message")
 	NewRegistrationHandler(ctx, connection.config, connection.Send, eventBus.Subscribe, eventBus.Emit)
 	NewPingHandler(ctx, connection.Send, eventBus.Subscribe, eventBus.Emit)
 
