@@ -45,10 +45,14 @@ func (s SASLState) String() string {
 }
 
 type SASLHandler struct {
-	connection *Connection
-	eventBus   *EventBus
-	ctx        context.Context
-	cancel     context.CancelFunc
+	subscribe   func(EventType, EventHandler) int
+	send        func(command string, params ...string) error
+	createCoord func(name string) <-chan struct{}
+	removeCoord func(name string)
+	signalCoord func(name string)
+	emit        func(event *Event)
+	ctx         context.Context
+	cancel      context.CancelFunc
 
 	state    SASLState
 	stateMux sync.RWMutex
@@ -69,12 +73,25 @@ type SASLHandler struct {
 	password string
 }
 
-func NewSASLHandler(ctx context.Context, connection *Connection, eventBus *EventBus, username, password string) *SASLHandler {
+func NewSASLHandler(ctx context.Context,
+	send func(command string, params ...string) error,
+	subscribe func(EventType, EventHandler) int,
+	emit func(event *Event),
+	createCoord func(name string) <-chan struct{},
+	removeCoord func(name string),
+	signalCoord func(name string),
+	username,
+	password string,
+) *SASLHandler {
 	ctx, cancel := context.WithCancel(ctx)
 
 	h := &SASLHandler{
-		connection:   connection,
-		eventBus:     eventBus,
+		send:         send,
+		subscribe:    subscribe,
+		emit:         emit,
+		createCoord:  createCoord,
+		removeCoord:  removeCoord,
+		signalCoord:  signalCoord,
 		ctx:          ctx,
 		cancel:       cancel,
 		state:        SASLStateInactive,
@@ -85,10 +102,10 @@ func NewSASLHandler(ctx context.Context, connection *Connection, eventBus *Event
 	}
 
 	slog.Debug("Creating SASL handler", "username", username, "has_password", password != "")
-	eventBus.Subscribe(EventSASLAuth, h.HandleAuthenticate)
-	eventBus.Subscribe(EventSASLSuccess, h.HandleSASLSuccess)
-	eventBus.Subscribe(EventSASLFail, h.HandleSASLFail)
-	eventBus.Subscribe(EventCapPreEnd, h.handleSasl)
+	subscribe(EventSASLAuth, h.HandleAuthenticate)
+	subscribe(EventSASLSuccess, h.HandleSASLSuccess)
+	subscribe(EventSASLFail, h.HandleSASLFail)
+	subscribe(EventCapPreEnd, h.handleSasl)
 	slog.Debug("SASL handler subscribed to events")
 	return h
 }
@@ -194,7 +211,7 @@ func (sh *SASLHandler) StartAuthentication() error {
 
 	sh.setState(SASLStateRequesting)
 
-	err := sh.connection.Send("AUTHENTICATE", mechanism.Name())
+	err := sh.send("AUTHENTICATE", mechanism.Name())
 	if err != nil {
 		sh.setState(SASLStateFailed)
 		slog.Error("Failed to send AUTHENTICATE command", "mechanism", mechanism.Name(), "error", err)
@@ -214,7 +231,7 @@ func (sh *SASLHandler) Abort() error {
 	sh.setState(SASLStateFailed)
 	sh.stopTimeout()
 
-	return sh.connection.Send("AUTHENTICATE", "*")
+	return sh.send("AUTHENTICATE", "*")
 }
 
 func (sh *SASLHandler) startTimeout() {
@@ -234,7 +251,7 @@ func (sh *SASLHandler) startTimeout() {
 			mechanismName = mechanism.Name()
 		}
 
-		sh.eventBus.Emit(&Event{
+		sh.emit(&Event{
 			Type: EventSASLFail,
 			Data: &SASLData{
 				Mechanism: mechanismName,
@@ -259,18 +276,18 @@ func (sh *SASLHandler) handleSasl(event *Event) {
 	capPreEndData, ok := event.Data.(*CapPreEndData)
 	if !ok {
 		slog.Error("Incorrect event type", "type", event.Data)
-		sh.eventBus.SignalCoordination("cap-pre-end")
+		sh.signalCoord("cap-pre-end")
 		return
 	}
 	if !slices.Contains(capPreEndData.ActiveCaps, "sasl") {
 		slog.Error("SASL required but not supported by server")
-		sh.eventBus.Emit(&Event{
+		sh.emit(&Event{
 			Type: EventError,
 			Data: &ErrorData{
 				Message: "SASL required but not supported by server",
 			},
 		})
-		sh.eventBus.SignalCoordination("cap-pre-end")
+		sh.signalCoord("cap-pre-end")
 		return
 	}
 
@@ -287,20 +304,20 @@ func (sh *SASLHandler) handleSasl(event *Event) {
 
 	if sh.username == "" && sh.password == "" {
 		slog.Error("No username and password specified")
-		sh.eventBus.SignalCoordination("cap-pre-end")
+		sh.signalCoord("cap-pre-end")
 		return
 	}
 
 	// Start authentication (non-blocking)
 	if err := sh.startPlainAuthentication(); err != nil {
-		sh.eventBus.Emit(&Event{
+		sh.emit(&Event{
 			Type: EventSASLFail,
 			Data: &SASLData{
 				Mechanism: "unknown",
 				Data:      fmt.Sprintf("failed to start SASL: %v", err),
 			},
 		})
-		sh.eventBus.SignalCoordination("cap-pre-end")
+		sh.signalCoord("cap-pre-end")
 		return
 	}
 
@@ -348,7 +365,7 @@ func (sh *SASLHandler) HandleAuthenticate(event *Event) {
 	}
 
 	if response == "" {
-		sh.connection.Send("AUTHENTICATE", "+")
+		sh.send("AUTHENTICATE", "+")
 		return
 	}
 
@@ -357,12 +374,12 @@ func (sh *SASLHandler) HandleAuthenticate(event *Event) {
 
 func (sh *SASLHandler) sendAuthData(data string) {
 	if len(data) == 0 {
-		sh.connection.Send("AUTHENTICATE", "+")
+		sh.send("AUTHENTICATE", "+")
 		return
 	}
 
 	if len(data) <= sh.maxChunkSize {
-		sh.connection.Send("AUTHENTICATE", data)
+		sh.send("AUTHENTICATE", data)
 		return
 	}
 
@@ -376,11 +393,11 @@ func (sh *SASLHandler) sendAuthData(data string) {
 		chunk := data[:chunkSize]
 		data = data[chunkSize:]
 
-		sh.connection.Send("AUTHENTICATE", chunk)
+		sh.send("AUTHENTICATE", chunk)
 	}
 
 	// Send final empty chunk to indicate end of data
-	sh.connection.Send("AUTHENTICATE", "+")
+	sh.send("AUTHENTICATE", "+")
 }
 
 func (sh *SASLHandler) HandleSASLSuccess(event *Event) {
@@ -394,7 +411,7 @@ func (sh *SASLHandler) HandleSASLSuccess(event *Event) {
 	mechanism := sh.GetMechanism()
 	if mechanism != nil {
 		slog.Info("SASL authentication successful", "mechanism", mechanism.Name())
-		sh.eventBus.Emit(&Event{
+		sh.emit(&Event{
 			Type: EventSASLSuccess,
 			Data: &SASLData{
 				Mechanism: mechanism.Name(),
@@ -404,7 +421,7 @@ func (sh *SASLHandler) HandleSASLSuccess(event *Event) {
 	}
 
 	// Signal that SASL authentication is complete
-	sh.eventBus.SignalCoordination("cap-pre-end")
+	sh.signalCoord("cap-pre-end")
 }
 
 func (sh *SASLHandler) HandleSASLFail(event *Event) {
@@ -427,7 +444,7 @@ func (sh *SASLHandler) HandleSASLFail(event *Event) {
 		reason = event.Message.GetTrailing()
 	}
 
-	sh.eventBus.Emit(&Event{
+	sh.emit(&Event{
 		Type: EventSASLFail,
 		Data: &SASLData{
 			Mechanism: mechanismName,
@@ -436,7 +453,7 @@ func (sh *SASLHandler) HandleSASLFail(event *Event) {
 	})
 
 	// Signal that SASL authentication is complete (even though it failed)
-	sh.eventBus.SignalCoordination("cap-pre-end")
+	sh.signalCoord("cap-pre-end")
 }
 
 func (sh *SASLHandler) Reset() {
