@@ -24,9 +24,9 @@ type CapabilitiesHandler struct {
 	requestedCaps    []string
 	pendingCaps      map[string]bool
 	pendingMux       sync.RWMutex
-	availableCaps    map[string]string // Capabilities from CAP LS
+	availableCaps    map[string]string
 	availableCapsMux sync.RWMutex
-	ackedCaps        map[string]string // Active capabilities from CAP ACK
+	ackedCaps        map[string]string
 	ackedCapsMux     sync.RWMutex
 
 	negotiating    bool
@@ -88,28 +88,25 @@ func (ch *CapabilitiesHandler) HandleCapLS(event *Event) {
 		return
 	}
 
-	// Parse and store available capability values from CAP LS response
+	var capsStr string
 	if event.Message != nil {
-		ch.parseAvailableCapabilities(event.Message.GetTrailing())
+		capsStr = event.Message.GetTrailing()
 	}
 
-	if len(ch.requestedCaps) > 0 {
-		err := ch.RequestCapabilities(ch.requestedCaps)
-		if err != nil {
-			slog.Error("Failed to request capabilities", "error", err)
-			return
-		}
+	err := ch.processNewCapabilities(capsStr)
+	if err != nil {
+		slog.Error("Failed to request capabilities", "error", err)
+		return
+	}
 
-		// Check if any capabilities are actually pending after filtering
-		if !ch.hasPendingCapabilities() {
-			slog.Debug("No requested capabilities are available, ending negotiation")
-			if err := ch.EndCapabilityNegotiation(); err != nil {
-				slog.Error("Failed to end capability negotiation", "error", err)
-			}
+	if len(ch.requestedCaps) == 0 || !ch.hasPendingCapabilities() {
+		var reason string
+		if len(ch.requestedCaps) == 0 {
+			reason = "No capabilities requested"
+		} else {
+			reason = "No requested capabilities are available"
 		}
-	} else {
-		// No capabilities requested, end negotiation immediately
-		slog.Debug("No capabilities requested, ending negotiation")
+		slog.Debug(reason + ", ending negotiation")
 		if err := ch.EndCapabilityNegotiation(); err != nil {
 			slog.Error("Failed to end capability negotiation", "error", err)
 		}
@@ -135,7 +132,6 @@ func (ch *CapabilitiesHandler) HandleCapACK(event *Event) {
 		ch.addCapability(capability)
 		ch.removePendingCapability(capability)
 
-		// Emit cap added event
 		ch.emit(&Event{
 			Type: EventCapAdded,
 			Data: &CapAddedData{
@@ -145,7 +141,6 @@ func (ch *CapabilitiesHandler) HandleCapACK(event *Event) {
 		})
 	}
 
-	// Check if we can end negotiation
 	ch.checkEndNegotiation()
 }
 
@@ -164,12 +159,10 @@ func (ch *CapabilitiesHandler) HandleCapNAK(event *Event) {
 
 	slog.Warn("Server rejected capabilities", "capabilities", nakedCaps)
 
-	// Remove rejected capabilities from pending
 	for _, capability := range nakedCaps {
 		ch.removePendingCapability(capability)
 	}
 
-	// Check if we can end negotiation
 	ch.checkEndNegotiation()
 }
 
@@ -187,7 +180,6 @@ func (ch *CapabilitiesHandler) HandleCapDEL(event *Event) {
 	for _, capability := range removedCaps {
 		ch.removeCapability(capability)
 
-		// Emit cap removed event
 		ch.emit(&Event{
 			Type: EventCapRemoved,
 			Data: &CapRemovedData{
@@ -205,12 +197,13 @@ func (ch *CapabilitiesHandler) HandleCapNEW(event *Event) {
 	}
 
 	capsStr := event.Message.GetTrailing()
-	newCaps := strings.Fields(capsStr)
 
-	slog.Info("Server advertised new capabilities", "capabilities", newCaps)
+	slog.Info("Server advertised new capabilities", "capabilities_string", capsStr)
 
-	// For now, we just log the new capabilities
-	// In a full implementation, you might want to automatically request some capabilities
+	err := ch.processNewCapabilities(capsStr)
+	if err != nil {
+		slog.Error("Failed to request new capabilities", "error", err)
+	}
 }
 
 func (ch *CapabilitiesHandler) RequestCapabilities(capabilities []string) error {
@@ -218,7 +211,6 @@ func (ch *CapabilitiesHandler) RequestCapabilities(capabilities []string) error 
 		return nil
 	}
 
-	// Filter capabilities to only those advertised by the server
 	ch.availableCapsMux.RLock()
 	availableCaps := make([]string, 0, len(capabilities))
 	for _, capability := range capabilities {
@@ -235,7 +227,6 @@ func (ch *CapabilitiesHandler) RequestCapabilities(capabilities []string) error 
 		return nil
 	}
 
-	// Mark available capabilities as pending
 	ch.pendingMux.Lock()
 	for _, capability := range availableCaps {
 		ch.pendingCaps[capability] = true
@@ -262,13 +253,10 @@ func (ch *CapabilitiesHandler) EndCapabilityNegotiation() error {
 	activeCaps := ch.GetActiveCaps()
 	slog.Info("Ending capability negotiation", "active_capabilities", activeCaps)
 
-	// Get capability values
 	capValues := ch.getCapabilityValues()
 
-	// Create coordination channel for handlers that need to complete before CAP END
 	coordCh := ch.createCoord("cap-pre-end")
 
-	// Emit pre-end event for handlers
 	preEndEvent := &Event{
 		Type: EventCapPreEnd,
 		Data: &CapPreEndData{
@@ -281,12 +269,8 @@ func (ch *CapabilitiesHandler) EndCapabilityNegotiation() error {
 	slog.Debug("Emitting pre-cap-end event")
 	ch.emit(preEndEvent)
 
-	// Wait for handlers asynchronously to avoid blocking the event bus
 	go func() {
 		defer ch.removeCoord("cap-pre-end")
-
-		// Wait for handlers that need to complete (e.g., SASL authentication)
-		// Use a reasonable timeout to avoid hanging indefinitely
 		select {
 		case <-coordCh:
 			slog.Debug("Handlers signaled completion")
@@ -297,7 +281,6 @@ func (ch *CapabilitiesHandler) EndCapabilityNegotiation() error {
 			return
 		}
 
-		// Now send CAP END
 		err := ch.send("CAP", "END")
 		if err != nil {
 			slog.Error("Failed to send CAP END", "error", err)
@@ -335,13 +318,11 @@ func (ch *CapabilitiesHandler) addCapability(capability string) {
 	defer ch.ackedCapsMux.Unlock()
 	defer ch.availableCapsMux.RUnlock()
 
-	// Don't overwrite existing capability
 	if _, exists := ch.ackedCaps[capability]; exists {
 		slog.Debug("Capability already exists, not overwriting", "capability", capability)
 		return
 	}
 
-	// Use the value from available capabilities if it exists, otherwise empty string
 	value := ""
 	if availableValue, exists := ch.availableCaps[capability]; exists {
 		value = availableValue
@@ -437,4 +418,35 @@ func (ch *CapabilitiesHandler) getCapabilityValues() map[string]string {
 		values[capability] = value
 	}
 	return values
+}
+
+func (ch *CapabilitiesHandler) processNewCapabilities(capsStr string) error {
+	ch.parseAvailableCapabilities(capsStr)
+
+	if len(ch.requestedCaps) == 0 {
+		return nil
+	}
+
+	newCaps := strings.Fields(capsStr)
+	capsToRequest := make([]string, 0)
+
+	for _, newCap := range newCaps {
+		capName := newCap
+		if strings.Contains(newCap, "=") {
+			capName = strings.SplitN(newCap, "=", 2)[0]
+		}
+		for _, requestedCap := range ch.requestedCaps {
+			if requestedCap == capName {
+				capsToRequest = append(capsToRequest, requestedCap)
+				break
+			}
+		}
+	}
+
+	if len(capsToRequest) > 0 {
+		slog.Info("Requesting newly available capabilities", "capabilities", capsToRequest)
+		return ch.RequestCapabilities(capsToRequest)
+	}
+
+	return nil
 }
