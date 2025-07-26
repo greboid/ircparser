@@ -122,6 +122,14 @@ func (sh *SASLHandler) GetMechanism() SASLMechanism {
 	return sh.mechanism
 }
 
+func (sh *SASLHandler) getMechanismName() string {
+	mechanism := sh.GetMechanism()
+	if mechanism != nil {
+		return mechanism.Name()
+	}
+	return "unknown"
+}
+
 func (sh *SASLHandler) GetState() SASLState {
 	sh.stateMux.RLock()
 	defer sh.stateMux.RUnlock()
@@ -339,7 +347,9 @@ func (sh *SASLHandler) HandleAuthenticate(event *Event) {
 	mechanism := sh.GetMechanism()
 
 	if mechanism == nil {
-		sh.Abort()
+		if err := sh.Abort(); err != nil {
+			slog.Error("Failed to abort SASL authentication", "error", err)
+		}
 		return
 	}
 
@@ -353,19 +363,32 @@ func (sh *SASLHandler) HandleAuthenticate(event *Event) {
 	} else {
 		decodedChallenge, decodeErr := base64.StdEncoding.DecodeString(challenge)
 		if decodeErr != nil {
-			sh.Abort()
+			if err := sh.Abort(); err != nil {
+				slog.Error("Failed to abort SASL authentication", "error", err)
+			}
 			return
 		}
 		response, err = mechanism.Next(string(decodedChallenge))
 	}
 
 	if err != nil {
-		sh.Abort()
+		if abortErr := sh.Abort(); abortErr != nil {
+			slog.Error("Failed to abort SASL authentication", "error", abortErr)
+		}
 		return
 	}
 
 	if response == "" {
-		sh.send("AUTHENTICATE", "+")
+		if err := sh.send("AUTHENTICATE", "+"); err != nil {
+			sh.setState(SASLStateFailed)
+			sh.emit(&Event{
+				Type: EventSASLFail,
+				Data: &SASLData{
+					Mechanism: mechanism.Name(),
+					Data:      fmt.Sprintf("send failed: %v", err),
+				},
+			})
+		}
 		return
 	}
 
@@ -374,12 +397,30 @@ func (sh *SASLHandler) HandleAuthenticate(event *Event) {
 
 func (sh *SASLHandler) sendAuthData(data string) {
 	if len(data) == 0 {
-		sh.send("AUTHENTICATE", "+")
+		if err := sh.send("AUTHENTICATE", "+"); err != nil {
+			sh.setState(SASLStateFailed)
+			sh.emit(&Event{
+				Type: EventSASLFail,
+				Data: &SASLData{
+					Mechanism: sh.getMechanismName(),
+					Data:      fmt.Sprintf("send failed: %v", err),
+				},
+			})
+		}
 		return
 	}
 
 	if len(data) <= sh.maxChunkSize {
-		sh.send("AUTHENTICATE", data)
+		if err := sh.send("AUTHENTICATE", data); err != nil {
+			sh.setState(SASLStateFailed)
+			sh.emit(&Event{
+				Type: EventSASLFail,
+				Data: &SASLData{
+					Mechanism: sh.getMechanismName(),
+					Data:      fmt.Sprintf("send failed: %v", err),
+				},
+			})
+		}
 		return
 	}
 
@@ -393,11 +434,30 @@ func (sh *SASLHandler) sendAuthData(data string) {
 		chunk := data[:chunkSize]
 		data = data[chunkSize:]
 
-		sh.send("AUTHENTICATE", chunk)
+		if err := sh.send("AUTHENTICATE", chunk); err != nil {
+			sh.setState(SASLStateFailed)
+			sh.emit(&Event{
+				Type: EventSASLFail,
+				Data: &SASLData{
+					Mechanism: sh.getMechanismName(),
+					Data:      fmt.Sprintf("send failed: %v", err),
+				},
+			})
+			return
+		}
 	}
 
 	// Send final empty chunk to indicate end of data
-	sh.send("AUTHENTICATE", "+")
+	if err := sh.send("AUTHENTICATE", "+"); err != nil {
+		sh.setState(SASLStateFailed)
+		sh.emit(&Event{
+			Type: EventSASLFail,
+			Data: &SASLData{
+				Mechanism: sh.getMechanismName(),
+				Data:      fmt.Sprintf("send failed: %v", err),
+			},
+		})
+	}
 }
 
 func (sh *SASLHandler) HandleSASLSuccess(event *Event) {
