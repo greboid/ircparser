@@ -2,56 +2,61 @@ package parser
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-func TestNewPlainMechanism_SecureCredentialHandling(t *testing.T) {
-	username := "testuser"
-	password := "testpass"
-
-	// Create mechanism using secure constructor
-	mechanism := NewPlainMechanism(username, password)
-
-	// Verify mechanism is properly initialized
-	if mechanism.Name() != "PLAIN" {
-		t.Errorf("Expected PLAIN, got %s", mechanism.Name())
+func TestPlainMechanism(t *testing.T) {
+	tests := []struct {
+		name     string
+		username string
+		password string
+		testFunc func(t *testing.T, username, password string)
+	}{
+		{
+			name:     "secure credential handling",
+			username: "testuser",
+			password: "testpass",
+			testFunc: testSecureCredentialHandling,
+		},
+		{
+			name:     "next returns error",
+			username: "user",
+			password: "pass",
+			testFunc: testNextReturnsError,
+		},
 	}
 
-	// Test Start() method
-	encoded, err := mechanism.Start()
-	if err != nil {
-		t.Fatalf("Start() failed: %v", err)
-	}
-
-	if encoded == "" {
-		t.Error("Start() returned empty encoded string")
-	}
-
-	// Verify mechanism is marked complete
-	if !mechanism.IsComplete() {
-		t.Error("Mechanism should be complete after Start()")
-	}
-
-	// Test Reset() method - this should zero out credentials
-	mechanism.Reset()
-
-	// Verify reset worked
-	if mechanism.IsComplete() {
-		t.Error("Mechanism should not be complete after Reset()")
-	}
-
-	// Verify credentials are zeroed (should be nil after reset)
-	if mechanism.username != nil || mechanism.password != nil {
-		t.Error("Credentials should be nil after Reset()")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.testFunc(t, tt.username, tt.password)
+		})
 	}
 }
 
-func TestPlainMechanism_Next_ReturnsError(t *testing.T) {
-	mechanism := NewPlainMechanism("user", "pass")
+func testSecureCredentialHandling(t *testing.T, username, password string) {
+	mechanism := NewPlainMechanism(username, password)
+
+	assert.Equal(t, "PLAIN", mechanism.Name())
+
+	encoded, err := mechanism.Start()
+	assert.NoError(t, err)
+	assert.NotEmpty(t, encoded)
+
+	assert.True(t, mechanism.IsComplete(), "Mechanism should be complete after Start()")
+
+	mechanism.Reset()
+
+	assert.False(t, mechanism.IsComplete(), "Mechanism should not be complete after Reset()")
+	assert.Nil(t, mechanism.username, "Username should be nil after Reset()")
+	assert.Nil(t, mechanism.password, "Password should be nil after Reset()")
+}
+
+func testNextReturnsError(t *testing.T, username, password string) {
+	mechanism := NewPlainMechanism(username, password)
 
 	_, err := mechanism.Next("challenge")
-	if err == nil {
-		t.Error("Next() should return error for PLAIN mechanism")
-	}
+	assert.Error(t, err, "Next() should return error for PLAIN mechanism")
 }
 
 func TestPlainMechanism_Start_EmptyCredentials(t *testing.T) {
@@ -69,9 +74,7 @@ func TestPlainMechanism_Start_EmptyCredentials(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mechanism := NewPlainMechanism(tt.username, tt.password)
 			_, err := mechanism.Start()
-			if err == nil {
-				t.Error("Start() should return error for empty credentials")
-			}
+			assert.Error(t, err, "Start() should return error for empty credentials")
 		})
 	}
 }
