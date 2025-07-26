@@ -13,13 +13,12 @@ const (
 )
 
 type CapabilitiesHandler struct {
-	send        func(command string, params ...string) error
-	subscribe   func(EventType, EventHandler) int
-	emit        func(event *Event)
-	createCoord func(name string) <-chan struct{}
-	removeCoord func(name string)
-	ctx         context.Context
-	cancel      context.CancelFunc
+	send           func(command string, params ...string) error
+	subscribe      func(EventType, EventHandler) int
+	emit           func(event *Event)
+	countListeners func(EventType) int
+	ctx            context.Context
+	cancel         context.CancelFunc
 
 	requestedCaps    []string
 	pendingCaps      map[string]bool
@@ -31,6 +30,8 @@ type CapabilitiesHandler struct {
 
 	negotiating    bool
 	negotiatingMux sync.RWMutex
+
+	readyCh chan struct{}
 }
 
 func NewCapabilitiesHandler(
@@ -38,24 +39,23 @@ func NewCapabilitiesHandler(
 	send func(command string, params ...string) error,
 	subscribe func(EventType, EventHandler) int,
 	emit func(event *Event),
-	createCoord func(name string) <-chan struct{},
-	removeCoord func(name string),
+	countListeners func(EventType) int,
 	capabilities map[string]string, caps ...string,
 ) *CapabilitiesHandler {
 	ctx, cancel := context.WithCancel(ctx)
 
 	h := &CapabilitiesHandler{
-		send:          send,
-		emit:          emit,
-		subscribe:     subscribe,
-		removeCoord:   removeCoord,
-		createCoord:   createCoord,
-		ctx:           ctx,
-		cancel:        cancel,
-		requestedCaps: caps,
-		pendingCaps:   make(map[string]bool),
-		availableCaps: make(map[string]string),
-		ackedCaps:     capabilities,
+		send:           send,
+		emit:           emit,
+		subscribe:      subscribe,
+		countListeners: countListeners,
+		ctx:            ctx,
+		cancel:         cancel,
+		requestedCaps:  caps,
+		pendingCaps:    make(map[string]bool),
+		availableCaps:  make(map[string]string),
+		ackedCaps:      capabilities,
+		readyCh:        make(chan struct{}, 100), // Buffered for multiple handlers
 	}
 
 	subscribe(EventConnected, h.HandleConnected)
@@ -64,6 +64,8 @@ func NewCapabilitiesHandler(
 	subscribe(EventCapNAK, h.HandleCapNAK)
 	subscribe(EventCapDEL, h.HandleCapDEL)
 	subscribe(EventCapNEW, h.HandleCapNEW)
+	subscribe(EventCapEnd, h.HandleCapEnd)
+	subscribe(EventCapEndReady, h.HandleCapEndReady)
 
 	return h
 }
@@ -255,8 +257,6 @@ func (ch *CapabilitiesHandler) EndCapabilityNegotiation() error {
 
 	capValues := ch.getCapabilityValues()
 
-	coordCh := ch.createCoord("cap-pre-end")
-
 	preEndEvent := &Event{
 		Type: EventCapPreEnd,
 		Data: &CapPreEndData{
@@ -269,29 +269,67 @@ func (ch *CapabilitiesHandler) EndCapabilityNegotiation() error {
 	slog.Debug("Emitting pre-cap-end event")
 	ch.emit(preEndEvent)
 
+	// Wait for handlers to signal completion or timeout
 	go func() {
-		defer ch.removeCoord("cap-pre-end")
-		select {
-		case <-coordCh:
-			slog.Debug("Handlers signaled completion")
-		case <-time.After(30 * time.Second):
-			slog.Warn("Timeout waiting for handlers to complete, proceeding with CAP END")
-		case <-ch.ctx.Done():
-			slog.Debug("Context cancelled while waiting for handlers")
+		expectedHandlers := ch.countListeners(EventCapPreEnd)
+		readyCount := 0
+
+		timer := time.NewTimer(30 * time.Second)
+		defer timer.Stop()
+
+		slog.Debug("Waiting for handlers to signal ready", "expected", expectedHandlers)
+
+		if expectedHandlers == 0 {
+			// No handlers registered, proceed immediately
+			slog.Debug("No handlers registered for EventCapPreEnd, proceeding with CAP END")
+			ch.HandleCapEnd(&Event{Type: EventCapEnd, Time: time.Now()})
 			return
 		}
 
-		err := ch.send("CAP", "END")
-		if err != nil {
-			slog.Error("Failed to send CAP END", "error", err)
-			return
+		for {
+			select {
+			case <-ch.readyCh:
+				readyCount++
+				slog.Debug("Handler signaled ready", "ready_count", readyCount, "expected", expectedHandlers)
+				if readyCount >= expectedHandlers {
+					slog.Debug("All handlers signaled ready, proceeding with CAP END")
+					ch.HandleCapEnd(&Event{Type: EventCapEnd, Time: time.Now()})
+					return
+				}
+			case <-timer.C:
+				slog.Warn("Timeout waiting for handlers to complete", "ready_count", readyCount, "expected", expectedHandlers)
+				ch.HandleCapEnd(&Event{Type: EventCapEnd, Time: time.Now()})
+				return
+			case <-ch.ctx.Done():
+				slog.Debug("Context cancelled while waiting for handlers")
+				return
+			}
 		}
-
-		ch.setNegotiating(false)
-		slog.Debug("Capability negotiation ended")
 	}()
 
 	return nil
+}
+
+func (ch *CapabilitiesHandler) HandleCapEnd(event *Event) {
+	slog.Debug("Handlers signaled completion")
+
+	err := ch.send("CAP", "END")
+	if err != nil {
+		slog.Error("Failed to send CAP END", "error", err)
+		return
+	}
+
+	ch.setNegotiating(false)
+	slog.Debug("Capability negotiation ended")
+}
+
+func (ch *CapabilitiesHandler) HandleCapEndReady(event *Event) {
+	select {
+	case ch.readyCh <- struct{}{}:
+		slog.Debug("Handler signaled ready for cap end")
+	default:
+		slog.Debug("Ready channel full, signal dropped")
+	}
 }
 
 func (ch *CapabilitiesHandler) IsCapabilityActive(capability string) bool {

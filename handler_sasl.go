@@ -45,14 +45,11 @@ func (s SASLState) String() string {
 }
 
 type SASLHandler struct {
-	subscribe   func(EventType, EventHandler) int
-	send        func(command string, params ...string) error
-	createCoord func(name string) <-chan struct{}
-	removeCoord func(name string)
-	signalCoord func(name string)
-	emit        func(event *Event)
-	ctx         context.Context
-	cancel      context.CancelFunc
+	subscribe func(EventType, EventHandler) int
+	send      func(command string, params ...string) error
+	emit      func(event *Event)
+	ctx       context.Context
+	cancel    context.CancelFunc
 
 	state    SASLState
 	stateMux sync.RWMutex
@@ -77,9 +74,6 @@ func NewSASLHandler(ctx context.Context,
 	send func(command string, params ...string) error,
 	subscribe func(EventType, EventHandler) int,
 	emit func(event *Event),
-	createCoord func(name string) <-chan struct{},
-	removeCoord func(name string),
-	signalCoord func(name string),
 	username,
 	password string,
 ) *SASLHandler {
@@ -89,9 +83,6 @@ func NewSASLHandler(ctx context.Context,
 		send:         send,
 		subscribe:    subscribe,
 		emit:         emit,
-		createCoord:  createCoord,
-		removeCoord:  removeCoord,
-		signalCoord:  signalCoord,
 		ctx:          ctx,
 		cancel:       cancel,
 		state:        SASLStateInactive,
@@ -106,6 +97,7 @@ func NewSASLHandler(ctx context.Context,
 	subscribe(EventSASLSuccess, h.HandleSASLSuccess)
 	subscribe(EventSASLFail, h.HandleSASLFail)
 	subscribe(EventCapPreEnd, h.handleSasl)
+	subscribe(EventCapEndReady, func(event *Event) {}) // Just for counting
 	slog.Debug("SASL handler subscribed to events")
 	return h
 }
@@ -284,7 +276,10 @@ func (sh *SASLHandler) handleSasl(event *Event) {
 	capPreEndData, ok := event.Data.(*CapPreEndData)
 	if !ok {
 		slog.Error("Incorrect event type", "type", event.Data)
-		sh.signalCoord("cap-pre-end")
+		sh.emit(&Event{
+			Type: EventCapEndReady,
+			Time: time.Now().UTC(),
+		})
 		return
 	}
 	if !slices.Contains(capPreEndData.ActiveCaps, "sasl") {
@@ -295,7 +290,10 @@ func (sh *SASLHandler) handleSasl(event *Event) {
 				Message: "SASL required but not supported by server",
 			},
 		})
-		sh.signalCoord("cap-pre-end")
+		sh.emit(&Event{
+			Type: EventCapEndReady,
+			Time: time.Now().UTC(),
+		})
 		return
 	}
 
@@ -312,7 +310,10 @@ func (sh *SASLHandler) handleSasl(event *Event) {
 
 	if sh.username == "" && sh.password == "" {
 		slog.Error("No username and password specified")
-		sh.signalCoord("cap-pre-end")
+		sh.emit(&Event{
+			Type: EventCapEndReady,
+			Time: time.Now().UTC(),
+		})
 		return
 	}
 
@@ -325,7 +326,10 @@ func (sh *SASLHandler) handleSasl(event *Event) {
 				Data:      fmt.Sprintf("failed to start SASL: %v", err),
 			},
 		})
-		sh.signalCoord("cap-pre-end")
+		sh.emit(&Event{
+			Type: EventCapEndReady,
+			Time: time.Now().UTC(),
+		})
 		return
 	}
 
@@ -481,7 +485,10 @@ func (sh *SASLHandler) HandleSASLSuccess(event *Event) {
 	}
 
 	// Signal that SASL authentication is complete
-	sh.signalCoord("cap-pre-end")
+	sh.emit(&Event{
+		Type: EventCapEndReady,
+		Time: time.Now().UTC(),
+	})
 }
 
 func (sh *SASLHandler) HandleSASLFail(event *Event) {
@@ -513,7 +520,10 @@ func (sh *SASLHandler) HandleSASLFail(event *Event) {
 	})
 
 	// Signal that SASL authentication is complete (even though it failed)
-	sh.signalCoord("cap-pre-end")
+	sh.emit(&Event{
+		Type: EventCapEndReady,
+		Time: time.Now().UTC(),
+	})
 }
 
 func (sh *SASLHandler) Reset() {

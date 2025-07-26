@@ -85,6 +85,8 @@ const (
 	EventCapAdded     EventType = "cap_added"
 	EventCapRemoved   EventType = "cap_removed"
 	EventCapPreEnd    EventType = "cap_pre_end"
+	EventCapEndReady  EventType = "cap_end_ready"
+	EventCapEnd       EventType = "cap_end"
 	EventSASLAuth     EventType = "sasl_auth"
 	EventSASLSuccess  EventType = "sasl_success"
 	EventSASLFail     EventType = "sasl_fail"
