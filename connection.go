@@ -383,7 +383,7 @@ func (c *Connection) GetISupport() map[string]string {
 	defer c.isupportMux.RUnlock()
 
 	isupport := make(map[string]string)
-	maps.Copy(c.isupport, isupport)
+	maps.Copy(isupport, c.isupport)
 	return isupport
 }
 
