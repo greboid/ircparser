@@ -41,7 +41,7 @@ func NewParser(ctx context.Context, config *ConnectionConfig) *Parser {
 	}
 	NewCapabilitiesHandler(ctx, connection.Send, eventBus.Subscribe, eventBus.Emit, eventBus.CreateCoordination,
 		eventBus.RemoveCoordination, parser.capabilities, "sasl", "echo-message")
-	NewRegistrationHandler(ctx, connection.config, connection.Send, eventBus.Subscribe, eventBus.Emit)
+	NewRegistrationHandler(ctx, connection.config, connection.Send, eventBus.Subscribe, eventBus.UnsubscribeByID, eventBus.Emit)
 	NewPingHandler(ctx, connection.Send, eventBus.Subscribe, eventBus.Emit)
 
 	slog.Debug("Parser created successfully")
