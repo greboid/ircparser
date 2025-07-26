@@ -564,10 +564,7 @@ func (sh *SASLHandler) startPlainAuthentication() error {
 		return fmt.Errorf("username and password required for PLAIN authentication")
 	}
 
-	mechanism := &PlainMechanism{
-		username: sh.username,
-		password: sh.password,
-	}
+	mechanism := NewPlainMechanism(sh.username, sh.password)
 	sh.SetMechanism(mechanism)
 	return sh.StartAuthentication()
 }
