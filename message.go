@@ -11,6 +11,7 @@ import (
 // Message parsing constants
 const (
 	MaxMessageLength = 512
+	MaxTagLength     = 8192
 )
 
 type Tags map[string]string
@@ -31,10 +32,11 @@ func ParseMessage(raw string) (*Message, error) {
 		return nil, fmt.Errorf("invalid UTF-8 in message")
 	}
 
-	// TODO: Decide how to handle this better - and add unit test
-	if len(raw) > MaxMessageLength {
-		slog.Debug("Message parsing: too long", "length", len(raw), "max_length", MaxMessageLength)
-		// return nil, fmt.Errorf("message too long: %d bytes", len(raw))
+	// This should really only check MaxMessageLength, and count tags separately, this avoids any memory issues
+	// allows some bad implementations to get away with a few mistakes and doesn't post any real issues.
+	if len(raw) > MaxMessageLength+MaxTagLength {
+		slog.Debug("Message parsing: too long", "length", len(raw), "max_length", MaxMessageLength, "max_tag_length", MaxTagLength)
+		return nil, fmt.Errorf("message too long: %d bytes", len(raw))
 	}
 
 	raw = strings.TrimSuffix(raw, "\r\n")
