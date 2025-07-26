@@ -4,14 +4,12 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
 	"net"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -318,12 +316,7 @@ func (c *Connection) SendRaw(line string) error {
 	_, err := c.writer.WriteString(line + "\r\n")
 	if err != nil {
 		slog.Error("Failed to write line", "host", c.config.Host, "line", line, "error", err)
-
-		// Check if this is a critical error that indicates connection failure
-		if c.isCriticalWriteError(err) {
-			slog.Warn("Critical write error detected, triggering disconnect", "host", c.config.Host, "error", err)
-			c.handleCriticalWriteError(err)
-		}
+		c.handleCriticalWriteError(err)
 	}
 	return err
 }
@@ -406,47 +399,13 @@ func (c *Connection) Wait() {
 	c.wg.Wait()
 }
 
-// isCriticalWriteError determines if a write error indicates connection failure
-func (c *Connection) isCriticalWriteError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	// Check for network-level errors that indicate connection failure
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		// Timeout errors during writes often indicate connection issues
-		if netErr.Timeout() {
-			return true
-		}
-	}
-
-	// Check for system-level errors
-	var opErr *net.OpError
-	if errors.As(err, &opErr) {
-		// Check for syscall errors that indicate connection failure
-		if errors.Is(opErr.Err, syscall.EPIPE) ||
-			errors.Is(opErr.Err, syscall.ECONNRESET) ||
-			errors.Is(opErr.Err, syscall.ECONNABORTED) ||
-			errors.Is(opErr.Err, syscall.ENOTCONN) {
-			return true
-		}
-	}
-
-	return false
-}
-
-// handleCriticalWriteError handles critical write errors by triggering disconnection
 func (c *Connection) handleCriticalWriteError(err error) {
-	// Only handle if we're not already disconnecting
 	if c.getState() == StateDisconnecting || c.getState() == StateDisconnected {
 		return
 	}
 
-	// Update connection state to disconnected
 	c.setState(StateDisconnected)
 
-	// Emit disconnect event
 	c.eventBus.Emit(&Event{
 		Type: EventDisconnected,
 		Data: &DisconnectedData{
