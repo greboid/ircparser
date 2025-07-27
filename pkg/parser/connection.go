@@ -13,16 +13,6 @@ import (
 	"time"
 )
 
-const (
-	DefaultConnTimeout    = 30 * time.Second
-	DefaultReadTimeout    = 300 * time.Second // 5 minutes
-	DefaultWriteTimeout   = 30 * time.Second
-	DefaultPingTimeout    = 60 * time.Second
-	DefaultReconnectDelay = 5 * time.Second
-	WriteFlushInterval    = 100 * time.Millisecond
-	ConnectionWorkerCount = 2
-)
-
 type Connection struct {
 	config   *ConnectionConfig
 	conn     net.Conn
@@ -44,7 +34,7 @@ type Connection struct {
 }
 
 func NewConnection(ctx context.Context, config *ConnectionConfig, eventBus *EventBus) *Connection {
-	slog.Debug("Creating new connection", "host", config.Host, "port", config.Port, "tls", config.TLS)
+	slog.Debug("Creating new connection", "host", config.Host(), "port", config.Port(), "tls", config.TLS())
 	ctx, cancel := context.WithCancel(ctx)
 
 	return &Connection{
@@ -59,29 +49,29 @@ func NewConnection(ctx context.Context, config *ConnectionConfig, eventBus *Even
 
 func (c *Connection) Connect() error {
 	slog.Info("Initiating IRC connection",
-		"host", c.config.Host,
-		"port", c.config.Port,
-		"tls", c.config.TLS,
-		"timeout", c.config.ConnTimeout)
+		"host", c.config.Host(),
+		"port", c.config.Port(),
+		"tls", c.config.TLS(),
+		"timeout", c.config.ConnTimeout())
 
 	c.setState(StateConnecting)
 
-	address := fmt.Sprintf("%s:%d", c.config.Host, c.config.Port)
+	address := fmt.Sprintf("%s:%d", c.config.Host(), c.config.Port())
 
 	var conn net.Conn
 	var err error
 
-	if c.config.TLS {
+	if c.config.TLS() {
 		slog.Debug("Establishing TLS connection", "address", address)
 		tlsConfig := &tls.Config{
-			ServerName: c.config.Host,
+			ServerName: c.config.Host(),
 		}
 		conn, err = tls.DialWithDialer(&net.Dialer{
-			Timeout: c.config.ConnTimeout,
+			Timeout: c.config.ConnTimeout(),
 		}, "tcp", address, tlsConfig)
 	} else {
 		slog.Debug("Establishing plain TCP connection", "address", address)
-		conn, err = net.DialTimeout("tcp", address, c.config.ConnTimeout)
+		conn, err = net.DialTimeout("tcp", address, c.config.ConnTimeout())
 	}
 
 	if err != nil {
@@ -95,7 +85,7 @@ func (c *Connection) Connect() error {
 	c.writer = bufio.NewWriter(conn)
 	c.setState(StateConnected)
 
-	slog.Info("IRC connection established", "address", address, "tls", c.config.TLS)
+	slog.Info("IRC connection established", "address", address, "tls", c.config.TLS())
 
 	c.wg.Add(ConnectionWorkerCount)
 	go c.readLoop()
@@ -104,7 +94,7 @@ func (c *Connection) Connect() error {
 	c.eventBus.Emit(&Event{
 		Type: EventConnected,
 		Data: &ConnectedData{
-			ServerName: c.config.Host,
+			ServerName: c.config.Host(),
 		},
 	})
 
@@ -112,7 +102,7 @@ func (c *Connection) Connect() error {
 }
 
 func (c *Connection) Disconnect() {
-	slog.Info("Initiating IRC disconnection", "host", c.config.Host)
+	slog.Info("Initiating IRC disconnection", "host", c.config.Host())
 
 	c.setState(StateDisconnecting)
 
@@ -129,7 +119,7 @@ func (c *Connection) Disconnect() {
 
 	c.setState(StateDisconnected)
 
-	slog.Info("IRC connection closed", "host", c.config.Host)
+	slog.Info("IRC connection closed", "host", c.config.Host())
 	c.eventBus.Emit(&Event{
 		Type: EventDisconnected,
 		Data: &DisconnectedData{
@@ -139,7 +129,7 @@ func (c *Connection) Disconnect() {
 }
 
 func (c *Connection) readLoop() {
-	slog.Debug("Starting read loop", "host", c.config.Host)
+	slog.Debug("Starting read loop", "host", c.config.Host())
 	defer c.wg.Done()
 	defer func() {
 		if c.conn != nil {
@@ -148,7 +138,7 @@ func (c *Connection) readLoop() {
 				slog.Debug("Error closing connection", "error", err)
 			}
 		}
-		slog.Debug("Read loop ended", "host", c.config.Host)
+		slog.Debug("Read loop ended", "host", c.config.Host())
 	}()
 
 	for {
@@ -158,8 +148,8 @@ func (c *Connection) readLoop() {
 		default:
 		}
 
-		if c.config.ReadTimeout > 0 && c.conn != nil {
-			c.conn.SetReadDeadline(time.Now().Add(c.config.ReadTimeout))
+		if c.config.ReadTimeout() > 0 && c.conn != nil {
+			c.conn.SetReadDeadline(time.Now().Add(c.config.ReadTimeout()))
 		}
 
 		if c.reader == nil {
@@ -169,7 +159,7 @@ func (c *Connection) readLoop() {
 		line, err := c.reader.ReadString('\n')
 		if err != nil {
 			if c.getState() != StateDisconnecting {
-				slog.Error("Read error in connection", "host", c.config.Host, "error", err)
+				slog.Error("Read error in connection", "host", c.config.Host(), "error", err)
 				c.eventBus.Emit(&Event{
 					Type: EventDisconnected,
 					Data: &DisconnectedData{
@@ -197,7 +187,7 @@ func (c *Connection) readLoop() {
 		})
 
 		if err != nil {
-			slog.Error("Failed to parse message", "host", c.config.Host, "line", line, "error", err)
+			slog.Error("Failed to parse message", "host", c.config.Host(), "line", line, "error", err)
 			c.eventBus.Emit(&Event{
 				Type: EventError,
 				Data: &ErrorData{
@@ -212,10 +202,10 @@ func (c *Connection) readLoop() {
 }
 
 func (c *Connection) writeLoop() {
-	slog.Debug("Starting write loop", "host", c.config.Host)
+	slog.Debug("Starting write loop", "host", c.config.Host())
 	defer c.wg.Done()
 	defer func() {
-		slog.Debug("Write loop ended", "host", c.config.Host)
+		slog.Debug("Write loop ended", "host", c.config.Host())
 	}()
 
 	ticker := time.NewTicker(WriteFlushInterval)
@@ -247,7 +237,7 @@ func (c *Connection) handleMessage(msg *Message) {
 			c.setCurrentNick(msg.Params[0])
 		}
 		slog.Info("IRC connection received 001 welcome",
-			"server", c.config.Host,
+			"server", c.config.Host(),
 			"nick", c.GetCurrentNick(),
 			"old_nick", oldNick)
 
@@ -273,7 +263,7 @@ func (c *Connection) handleMessage(msg *Message) {
 }
 
 func (c *Connection) parseISUPPORT(msg *Message) {
-	slog.Debug("Parsing ISUPPORT", "host", c.config.Host, "params", msg.Params)
+	slog.Debug("Parsing ISUPPORT", "host", c.config.Host(), "params", msg.Params)
 	c.isupportMux.Lock()
 	defer c.isupportMux.Unlock()
 
@@ -286,18 +276,18 @@ func (c *Connection) parseISUPPORT(msg *Message) {
 			c.isupport[param] = ""
 		}
 	}
-	slog.Debug("ISUPPORT parsed", "host", c.config.Host, "feature_count", len(c.isupport))
+	slog.Debug("ISUPPORT parsed", "host", c.config.Host(), "feature_count", len(c.isupport))
 }
 
 func (c *Connection) SendRaw(line string) error {
 	c.writeMux.Lock()
 	defer c.writeMux.Unlock()
 	if c.getState() == StateDisconnected {
-		slog.Warn("Attempt to send while disconnected", "host", c.config.Host, "line", line)
+		slog.Warn("Attempt to send while disconnected", "host", c.config.Host(), "line", line)
 		return NewConnectionError("SendRaw", "connection not established", nil)
 	}
 	if c.writer == nil {
-		slog.Error("Writer not available", "host", c.config.Host)
+		slog.Error("Writer not available", "host", c.config.Host())
 		return NewConnectionError("SendRaw", "network writer not available", nil)
 	}
 
@@ -310,27 +300,27 @@ func (c *Connection) SendRaw(line string) error {
 		},
 	})
 
-	if c.config.WriteTimeout > 0 && c.conn != nil {
-		c.conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout))
+	if c.config.WriteTimeout() > 0 && c.conn != nil {
+		c.conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout()))
 	}
 
 	_, err := c.writer.WriteString(line + "\r\n")
 	if err != nil {
-		slog.Error("Failed to write line", "host", c.config.Host, "line", line, "error", err)
+		slog.Error("Failed to write line", "host", c.config.Host(), "line", line, "error", err)
 		c.handleCriticalWriteError(err)
 	}
 	return err
 }
 
 func (c *Connection) Send(command string, params ...string) error {
-	slog.Debug("Sending", "host", c.config.Host, "command", command, "params", params)
+	slog.Debug("Sending", "host", c.config.Host(), "command", command, "params", params)
 	msg := &Message{
 		Command: command,
 		Params:  params,
 	}
 	err := c.SendRaw(msg.String())
 	if err != nil {
-		slog.Error("Failed to send command", "host", c.config.Host, "command", command, "params", params, "error", err)
+		slog.Error("Failed to send command", "host", c.config.Host(), "command", command, "params", params, "error", err)
 	}
 	return err
 }
@@ -389,7 +379,7 @@ func (c *Connection) GetISupportValue(key string) string {
 }
 
 func (c *Connection) GetServerName() string {
-	return c.config.Host
+	return c.config.Host()
 }
 
 func (c *Connection) GetConfig() *ConnectionConfig {

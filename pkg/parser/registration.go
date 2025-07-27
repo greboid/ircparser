@@ -118,10 +118,10 @@ func (rh *RegistrationHandler) Start() error {
 }
 
 func (rh *RegistrationHandler) sendRegistrationCommands() {
-	slog.Info("Sending IRC registration commands", "nick", rh.config.Nick, "username", rh.config.Username, "has_password", rh.config.Password != "")
+	slog.Info("Sending IRC registration commands", "nick", rh.config.Nick(), "username", rh.config.Username(), "has_password", rh.config.Password() != "")
 
-	if rh.config.Password != "" {
-		if err := rh.send("PASS", rh.config.Password); err != nil {
+	if rh.config.Password() != "" {
+		if err := rh.send("PASS", rh.config.Password()); err != nil {
 			slog.Error("Failed to send PASS command", "error", err)
 			rh.setState(RegStateFailed)
 			rh.emit(&Event{
@@ -134,7 +134,7 @@ func (rh *RegistrationHandler) sendRegistrationCommands() {
 		}
 	}
 
-	if err := rh.send("NICK", rh.config.Nick); err != nil {
+	if err := rh.send("NICK", rh.config.Nick()); err != nil {
 		slog.Error("Failed to send NICK command", "error", err)
 		rh.setState(RegStateFailed)
 		rh.emit(&Event{
@@ -146,7 +146,7 @@ func (rh *RegistrationHandler) sendRegistrationCommands() {
 		return
 	}
 
-	if err := rh.send("USER", rh.config.Username, UserModeVisible, UserServerWildcard, rh.config.Realname); err != nil {
+	if err := rh.send("USER", rh.config.Username(), UserModeVisible, UserServerWildcard, rh.config.Realname()); err != nil {
 		slog.Error("Failed to send USER command", "error", err)
 		rh.setState(RegStateFailed)
 		rh.emit(&Event{
@@ -213,10 +213,10 @@ func (rh *RegistrationHandler) HandleNumeric(event *Event) {
 	}
 
 	if numericData.Code == "433" {
-		slog.Info("Nick in use, trying with underscore", "current_nick", rh.config.Nick)
-		rh.config.Nick = rh.config.Nick + "_"
-		if err := rh.send("NICK", rh.config.Nick); err != nil {
-			slog.Error("Failed to send NICK command for nick collision", "error", err, "new_nick", rh.config.Nick)
+		newNick := rh.config.Nick() + "_"
+		slog.Info("Nick in use, trying with underscore", "current_nick", rh.config.Nick(), "new_nick", newNick)
+		if err := rh.send("NICK", newNick); err != nil {
+			slog.Error("Failed to send NICK command for nick collision", "error", err, "new_nick", newNick)
 			rh.setState(RegStateFailed)
 			rh.emit(&Event{
 				Type: EventError,

@@ -6,10 +6,6 @@ import (
 	"sync"
 )
 
-const (
-	LogTrace = -8
-)
-
 type Parser struct {
 	connection   *Connection
 	eventBus     *EventBus
@@ -20,7 +16,7 @@ type Parser struct {
 }
 
 func NewParser(ctx context.Context, config *ConnectionConfig) *Parser {
-	slog.Debug("Creating new parser", "host", config.Host, "port", config.Port, "tls", config.TLS)
+	slog.Debug("Creating new parser", "host", config.Host(), "port", config.Port(), "tls", config.TLS())
 	ctx, cancel := context.WithCancel(ctx)
 
 	eventBus := NewEventBus(ctx)
@@ -34,12 +30,7 @@ func NewParser(ctx context.Context, config *ConnectionConfig) *Parser {
 		capabilities: make(map[string]string),
 	}
 
-	if config.SASLUser != "" && config.SASLPass != "" {
-		NewSASLHandler(ctx, connection.Send, eventBus.Subscribe, eventBus.Emit, config.SASLUser, config.SASLPass)
-	}
-	NewCapabilitiesHandler(ctx, connection.Send, eventBus.Subscribe, eventBus.Emit, eventBus.CountListeners, parser.capabilities, "sasl", "echo-message")
-	NewRegistrationHandler(ctx, connection.config, connection.Send, eventBus.Subscribe, eventBus.UnsubscribeByID, eventBus.Emit)
-	NewPingHandler(ctx, connection.Send, eventBus.Subscribe, eventBus.Emit)
+	SetupDefaultHandlers(ctx, connection, eventBus, config, parser.capabilities)
 
 	slog.Debug("Parser created successfully")
 	return parser
@@ -171,7 +162,7 @@ func (p *Parser) Notice(target, message string) error {
 func (p *Parser) generateFakeEcho(command, target, message string) {
 	currentNick := p.connection.GetCurrentNick()
 	fakeMsg := &Message{
-		Source:  currentNick + "!" + currentNick + "@" + p.connection.GetConfig().Host,
+		Source:  currentNick + "!" + currentNick + "@" + p.connection.GetConfig().Host(),
 		Command: command,
 		Params:  []string{target, message},
 		Tags:    make(Tags),

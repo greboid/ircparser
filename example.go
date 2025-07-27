@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"github.com/csmith/envflag/v2"
 	"github.com/csmith/slogflags"
-	"github.com/greboid/ircparser"
+	"github.com/greboid/ircparser/pkg/client"
+	"github.com/greboid/ircparser/pkg/parser"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -38,29 +39,35 @@ func main() {
 	if *username == "" {
 		*username = *nickname
 	}
-	conf := parser.NewConnectionConfig(*hostname, *port, *tls)
-	conf.Nick = *nickname
-	conf.Username = *username
-	conf.SASLUser = *saslusername
-	conf.SASLPass = *saslpassword
-	con := parser.NewParser(context.Background(), conf)
+	cli := client.NewClient(context.Background(),
+		parser.NewConnectionConfig(*hostname,
+			parser.WithPort(*port),
+			parser.WithTLS(*tls),
+			parser.WithNick(*nickname),
+			parser.WithUsername(*username),
+			parser.WithSASL(*saslusername, *saslpassword),
+		),
+	)
 	channels := 0
-	con.Subscribe(parser.EventJoin, func(event *parser.Event) {
+	cli.Subscribe(parser.EventJoin, func(event *parser.Event) {
 		if joinData, ok := event.Data.(*parser.JoinData); ok {
 			fmt.Println("Joined: " + joinData.Nick + " " + joinData.Channel)
+			if joinData.Nick == cli.GetCurrentNick() {
+				channels++
+			}
 		}
 	})
 	go func() {
 		time.Sleep(5 * time.Second)
-		if channels == 0 && *joinChannel != "" {
-			con.Join(*joinChannel)
+		if len(cli.GetChannels()) == 0 && *joinChannel != "" {
+			cli.Join(*joinChannel)
 		}
 	}()
-	err := con.Start()
+	err := cli.Start()
 	if err != nil {
 		panic(err)
 	}
-	defer con.Stop()
+	defer cli.Stop()
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit

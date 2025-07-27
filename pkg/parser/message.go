@@ -14,6 +14,10 @@ const (
 	MaxTagLength     = 8192
 )
 
+const (
+	LogTrace = -8
+)
+
 type Tags map[string]string
 
 type Message struct {
