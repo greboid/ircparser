@@ -2,7 +2,6 @@ package parser
 
 import (
 	"encoding/base64"
-	"fmt"
 )
 
 type SASLMechanism interface {
@@ -32,7 +31,7 @@ func (pm *PlainMechanism) Name() string {
 
 func (pm *PlainMechanism) Start() (string, error) {
 	if len(pm.username) == 0 || len(pm.password) == 0 {
-		return "", fmt.Errorf("username and password required for PLAIN")
+		return "", NewSASLError("Start", "username and password required for PLAIN mechanism", nil)
 	}
 
 	// Format: username\x00username\x00password
@@ -66,7 +65,7 @@ func (pm *PlainMechanism) Start() (string, error) {
 }
 
 func (pm *PlainMechanism) Next(string) (string, error) {
-	return "", fmt.Errorf("PLAIN mechanism does not support challenges")
+	return "", NewSASLError("Next", "PLAIN mechanism does not support challenge-response", nil)
 }
 
 func (pm *PlainMechanism) IsComplete() bool {

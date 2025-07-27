@@ -87,7 +87,7 @@ func (c *Connection) Connect() error {
 	if err != nil {
 		c.setState(StateDisconnected)
 		slog.Error("Connection failed", "address", address, "error", err)
-		return fmt.Errorf("failed to connect to %s: %w", address, err)
+		return NewConnectionError("Connect", "failed to establish network connection to "+address, err)
 	}
 
 	c.conn = conn
@@ -294,11 +294,11 @@ func (c *Connection) SendRaw(line string) error {
 	defer c.writeMux.Unlock()
 	if c.getState() == StateDisconnected {
 		slog.Warn("Attempt to send while disconnected", "host", c.config.Host, "line", line)
-		return fmt.Errorf("not connected")
+		return NewConnectionError("SendRaw", "connection not established", nil)
 	}
 	if c.writer == nil {
 		slog.Error("Writer not available", "host", c.config.Host)
-		return fmt.Errorf("writer not available")
+		return NewConnectionError("SendRaw", "network writer not available", nil)
 	}
 
 	slog.Log(context.Background(), LogTrace, "--> "+line)

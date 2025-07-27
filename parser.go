@@ -2,7 +2,6 @@ package parser
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"sync"
 )
@@ -52,7 +51,7 @@ func (p *Parser) Start() error {
 	err := p.connection.Connect()
 	if err != nil {
 		slog.Error("Failed to connect", "error", err)
-		return fmt.Errorf("failed to connect: %w", err)
+		return NewConnectionError("Start", "failed to establish connection", err)
 	}
 
 	slog.Info("Parser started successfully")
@@ -104,7 +103,7 @@ func (p *Parser) Send(command string, params ...string) error {
 func (p *Parser) Join(channel string) error {
 	if !p.connection.IsRegistered() {
 		slog.Warn("Join attempted but not registered", "channel", channel)
-		return fmt.Errorf("not registered")
+		return NewRegistrationError("Join", "client not registered with server")
 	}
 	slog.Debug("Joining channel", "channel", channel)
 	err := p.connection.Send("JOIN", channel)
@@ -117,7 +116,7 @@ func (p *Parser) Join(channel string) error {
 func (p *Parser) Part(channel string, reason string) error {
 	if !p.connection.IsRegistered() {
 		slog.Warn("Part attempted but not registered", "channel", channel)
-		return fmt.Errorf("not registered")
+		return NewRegistrationError("Part", "client not registered with server")
 	}
 	slog.Debug("Parting channel", "channel", channel, "reason", reason)
 	var err error
@@ -135,7 +134,7 @@ func (p *Parser) Part(channel string, reason string) error {
 func (p *Parser) Privmsg(target, message string) error {
 	if !p.connection.IsRegistered() {
 		slog.Warn("Privmsg attempted but not registered", "target", target)
-		return fmt.Errorf("not registered")
+		return NewRegistrationError("Privmsg", "client not registered with server")
 	}
 	slog.Debug("Sending privmsg", "target", target, "message_length", len(message))
 	err := p.connection.Send("PRIVMSG", target, message)
@@ -154,7 +153,7 @@ func (p *Parser) Privmsg(target, message string) error {
 func (p *Parser) Notice(target, message string) error {
 	if !p.connection.IsRegistered() {
 		slog.Warn("Notice attempted but not registered", "target", target)
-		return fmt.Errorf("not registered")
+		return NewRegistrationError("Notice", "client not registered with server")
 	}
 	slog.Debug("Sending notice", "target", target, "message_length", len(message))
 	err := p.connection.Send("NOTICE", target, message)
@@ -213,7 +212,7 @@ func (p *Parser) Quit(reason string) error {
 func (p *Parser) Mode(target, modes string, args ...string) error {
 	if !p.connection.IsRegistered() {
 		slog.Warn("Mode attempted but not registered", "target", target, "modes", modes)
-		return fmt.Errorf("not registered")
+		return NewRegistrationError("Mode", "client not registered with server")
 	}
 	slog.Debug("Setting mode", "target", target, "modes", modes, "args", args)
 	params := []string{target, modes}
@@ -227,7 +226,7 @@ func (p *Parser) Mode(target, modes string, args ...string) error {
 
 func (p *Parser) Topic(channel, topic string) error {
 	if !p.connection.IsRegistered() {
-		return fmt.Errorf("not registered")
+		return NewRegistrationError("Topic", "client not registered with server")
 	}
 	if topic != "" {
 		return p.connection.Send("TOPIC", channel, topic)
@@ -237,7 +236,7 @@ func (p *Parser) Topic(channel, topic string) error {
 
 func (p *Parser) Kick(channel, nick, reason string) error {
 	if !p.connection.IsRegistered() {
-		return fmt.Errorf("not registered")
+		return NewRegistrationError("Kick", "client not registered with server")
 	}
 	if reason != "" {
 		return p.connection.Send("KICK", channel, nick, reason)
@@ -247,28 +246,28 @@ func (p *Parser) Kick(channel, nick, reason string) error {
 
 func (p *Parser) Invite(nick, channel string) error {
 	if !p.connection.IsRegistered() {
-		return fmt.Errorf("not registered")
+		return NewRegistrationError("Invite", "client not registered with server")
 	}
 	return p.connection.Send("INVITE", nick, channel)
 }
 
 func (p *Parser) Whois(nick string) error {
 	if !p.connection.IsRegistered() {
-		return fmt.Errorf("not registered")
+		return NewRegistrationError("Whois", "client not registered with server")
 	}
 	return p.connection.Send("WHOIS", nick)
 }
 
 func (p *Parser) Who(target string) error {
 	if !p.connection.IsRegistered() {
-		return fmt.Errorf("not registered")
+		return NewRegistrationError("Who", "client not registered with server")
 	}
 	return p.connection.Send("WHO", target)
 }
 
 func (p *Parser) List(channels ...string) error {
 	if !p.connection.IsRegistered() {
-		return fmt.Errorf("not registered")
+		return NewRegistrationError("List", "client not registered with server")
 	}
 	if len(channels) > 0 {
 		return p.connection.Send("LIST", channels[0])
@@ -278,7 +277,7 @@ func (p *Parser) List(channels ...string) error {
 
 func (p *Parser) Names(channels ...string) error {
 	if !p.connection.IsRegistered() {
-		return fmt.Errorf("not registered")
+		return NewRegistrationError("Names", "client not registered with server")
 	}
 	if len(channels) > 0 {
 		return p.connection.Send("NAMES", channels[0])

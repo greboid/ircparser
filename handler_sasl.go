@@ -175,18 +175,18 @@ func (sh *SASLHandler) SupportsPlain() bool {
 func (sh *SASLHandler) StartAuthentication() error {
 	if sh.GetState() != SASLStateInactive {
 		slog.Warn("SASL authentication already in progress", "current_state", sh.GetState())
-		return fmt.Errorf("SASL authentication already in progress")
+		return NewSASLError("StartAuthentication", "SASL authentication session already active", nil)
 	}
 
 	mechanism := sh.GetMechanism()
 	if mechanism == nil {
 		slog.Error("No SASL mechanism configured")
-		return fmt.Errorf("no SASL mechanism configured")
+		return NewSASLError("StartAuthentication", "no SASL authentication mechanism configured", nil)
 	}
 
 	if !sh.IsAvailable() {
 		slog.Error("SASL not available from server")
-		return fmt.Errorf("SASL not available")
+		return NewSASLError("StartAuthentication", "SASL capability not available from server", nil)
 	}
 
 	mechs := sh.GetAvailableMechanisms()
@@ -202,7 +202,7 @@ func (sh *SASLHandler) StartAuthentication() error {
 		slog.Error("SASL mechanism not supported by server",
 			"mechanism", mechanism.Name(),
 			"available_mechanisms", mechs)
-		return fmt.Errorf("mechanism %s not supported by server", mechanism.Name())
+		return NewSASLError("StartAuthentication", fmt.Sprintf("SASL mechanism %s not supported by server", mechanism.Name()), nil)
 	}
 
 	slog.Info("Starting SASL authentication",
@@ -215,7 +215,7 @@ func (sh *SASLHandler) StartAuthentication() error {
 	if err != nil {
 		sh.setState(SASLStateFailed)
 		slog.Error("Failed to send AUTHENTICATE command", "mechanism", mechanism.Name(), "error", err)
-		return fmt.Errorf("failed to request SASL authentication: %w", err)
+		return NewSASLError("StartAuthentication", "failed to send SASL authentication request", err)
 	}
 
 	sh.startTimeout()
@@ -225,7 +225,7 @@ func (sh *SASLHandler) StartAuthentication() error {
 
 func (sh *SASLHandler) Abort() error {
 	if !sh.IsActive() {
-		return fmt.Errorf("SASL authentication not active")
+		return NewSASLError("ContinueAuthentication", "no active SASL authentication session", nil)
 	}
 
 	sh.setState(SASLStateFailed)
@@ -557,11 +557,11 @@ func (sh *SASLHandler) SetMaxChunkSize(size int) {
 // startPlainAuthentication starts PLAIN SASL authentication if supported
 func (sh *SASLHandler) startPlainAuthentication() error {
 	if !sh.SupportsPlain() {
-		return fmt.Errorf("PLAIN mechanism not supported by server")
+		return NewSASLError("authenticatePLAIN", "PLAIN mechanism not supported by server", nil)
 	}
 
 	if sh.username == "" || sh.password == "" {
-		return fmt.Errorf("username and password required for PLAIN authentication")
+		return NewSASLError("authenticatePLAIN", "username and password required for PLAIN authentication", nil)
 	}
 
 	mechanism := NewPlainMechanism(sh.username, sh.password)

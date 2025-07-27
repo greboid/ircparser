@@ -29,20 +29,20 @@ func ParseMessage(raw string) (*Message, error) {
 
 	if !utf8.ValidString(raw) {
 		slog.Debug("Message parsing failed: invalid UTF-8", "raw_length", len(raw))
-		return nil, fmt.Errorf("invalid UTF-8 in message")
+		return nil, NewMessageError("ParseMessage", "message contains invalid UTF-8 encoding", nil)
 	}
 
 	// This should really only check MaxMessageLength, and count tags separately, this avoids any memory issues
 	// allows some bad implementations to get away with a few mistakes and doesn't post any real issues.
 	if len(raw) > MaxMessageLength+MaxTagLength {
 		slog.Debug("Message parsing: too long", "length", len(raw), "max_length", MaxMessageLength, "max_tag_length", MaxTagLength)
-		return nil, fmt.Errorf("message too long: %d bytes", len(raw))
+		return nil, NewMessageError("ParseMessage", fmt.Sprintf("message exceeds maximum length: %d bytes", len(raw)), nil)
 	}
 
 	raw = strings.TrimSuffix(raw, "\r\n")
 	if raw == "" {
 		slog.Debug("Message parsing failed: empty after trimming")
-		return nil, fmt.Errorf("empty message")
+		return nil, NewMessageError("ParseMessage", "message is empty after processing", nil)
 	}
 
 	msg := &Message{
@@ -56,14 +56,14 @@ func ParseMessage(raw string) (*Message, error) {
 		pos = strings.Index(raw, " ")
 		if pos == -1 {
 			slog.Debug("Message parsing failed: tags without command")
-			return nil, fmt.Errorf("malformed message: tags without command")
+			return nil, NewMessageError("ParseMessage", "IRC message contains tags but no command", nil)
 		}
 
 		tagsStr := raw[1:pos]
 		slog.Debug("Parsing IRCv3 tags", "tags_string", tagsStr)
 		if err := msg.parseTags(tagsStr); err != nil {
 			slog.Debug("Tag parsing failed", "error", err, "tags_string", tagsStr)
-			return nil, fmt.Errorf("failed to parse tags: %w", err)
+			return nil, NewMessageError("ParseMessage", "failed to parse IRC message tags", err)
 		}
 		slog.Debug("Parsed IRCv3 tags", "tag_count", len(msg.Tags))
 		pos++
@@ -72,7 +72,7 @@ func ParseMessage(raw string) (*Message, error) {
 	if pos < len(raw) && raw[pos] == ':' {
 		spacePos := strings.Index(raw[pos:], " ")
 		if spacePos == -1 {
-			return nil, fmt.Errorf("malformed message: source without command")
+			return nil, NewMessageError("ParseMessage", "IRC message contains source but no command", nil)
 		}
 
 		msg.Source = raw[pos+1 : pos+spacePos]
@@ -80,13 +80,13 @@ func ParseMessage(raw string) (*Message, error) {
 	}
 
 	if pos >= len(raw) {
-		return nil, fmt.Errorf("malformed message: no command")
+		return nil, NewMessageError("ParseMessage", "IRC message missing required command", nil)
 	}
 
 	remaining := raw[pos:]
 	parts := strings.Split(remaining, " ")
 	if len(parts) == 0 {
-		return nil, fmt.Errorf("malformed message: no command")
+		return nil, NewMessageError("ParseMessage", "IRC message missing required command", nil)
 	}
 
 	msg.Command = strings.ToUpper(parts[0])
@@ -135,7 +135,7 @@ func (m *Message) parseTags(tagsStr string) error {
 			value := parts[1]
 
 			if key == "" {
-				return fmt.Errorf("empty tag key")
+				return NewMessageError("parseTags", "IRC message tag has empty key", nil)
 			}
 
 			unescapedValue := unescapeTagValue(value)

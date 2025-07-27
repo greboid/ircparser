@@ -106,7 +106,7 @@ func (rh *RegistrationHandler) IsFailed() bool {
 func (rh *RegistrationHandler) Start() error {
 	if rh.IsActive() {
 		slog.Warn("Registration start requested but already in progress", "current_state", rh.GetState().String())
-		return fmt.Errorf("registration already in progress")
+		return NewRegistrationError("StartRegistration", "IRC registration process already in progress")
 	}
 
 	slog.Info("Starting IRC registration", "timeout", rh.timeout)
