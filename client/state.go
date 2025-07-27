@@ -1,6 +1,8 @@
 package client
 
 import (
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -323,26 +325,74 @@ func (si *ServerInfo) GetCapabilities() map[string]string {
 }
 
 func (si *ServerInfo) parseChannelModes(value string) {
-	// TODO: Parse CHANMODES value (e.g., "b,k,l,imnpst")
-	// This would populate the ChannelModes map
+	// Parse CHANMODES value (e.g., "b,k,l,imnpst")
+	// Format: A,B,C,D where:
+	// A = modes that add/remove items to/from lists (e.g., +b nick!user@host)
+	// B = modes that require a parameter when set/unset (e.g., +k password)
+	// C = modes that require a parameter when set only (e.g., +l limit)
+	// D = modes that never require a parameter (e.g., +i, +m, +n, +p, +s, +t)
+
+	groups := strings.Split(value, ",")
+	if len(groups) != 4 {
+		return // Invalid CHANMODES format
+	}
+
+	// Type A: List modes (require parameter for both + and -)
+	for _, mode := range groups[0] {
+		si.ChannelModes[mode] = "list"
+	}
+
+	// Type B: Always parameter modes
+	for _, mode := range groups[1] {
+		si.ChannelModes[mode] = "always_param"
+	}
+
+	// Type C: Set-only parameter modes
+	for _, mode := range groups[2] {
+		si.ChannelModes[mode] = "set_param"
+	}
+
+	// Type D: Never parameter modes
+	for _, mode := range groups[3] {
+		si.ChannelModes[mode] = "never_param"
+	}
 }
 
 func (si *ServerInfo) parseChannelPrefixes(value string) {
-	// TODO: Parse PREFIX value (e.g., "(ov)@+")
-	// This would populate the ChannelPrefixes map
+	// Parse PREFIX value (e.g., "(ov)@+")
+	// Format: (modes)prefixes where modes and prefixes are same length
+	// Each mode corresponds to the prefix at the same position
+
+	if len(value) == 0 {
+		return
+	}
+
+	// Find the closing parenthesis
+	parenIndex := strings.Index(value, ")")
+	if parenIndex == -1 || !strings.HasPrefix(value, "(") {
+		return // Invalid PREFIX format
+	}
+
+	modes := value[1:parenIndex]     // Extract modes between parentheses
+	prefixes := value[parenIndex+1:] // Extract prefixes after parentheses
+
+	// Modes and prefixes must have same length
+	if len(modes) != len(prefixes) {
+		return
+	}
+
+	// Map each prefix to its corresponding mode
+	for i := 0; i < len(modes); i++ {
+		si.ChannelPrefixes[rune(prefixes[i])] = rune(modes[i])
+	}
 }
 
 // parseInt parses a string to int, returns 0 if invalid
 func parseInt(s string) int {
-	result := 0
-	for _, r := range s {
-		if r >= '0' && r <= '9' {
-			result = result*10 + int(r-'0')
-		} else {
-			return 0
-		}
+	if val, err := strconv.Atoi(s); err == nil {
+		return val
 	}
-	return result
+	return 0
 }
 
 // ClientState represents the complete state of an IRC client

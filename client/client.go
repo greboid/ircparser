@@ -453,8 +453,52 @@ func (c *Client) handleTopic(event *parser.Event) {
 }
 
 func (c *Client) handleNames(event *parser.Event) {
-	// TODO: Handle NAMES reply to populate channel user lists
-	// This would parse the 353 numeric to get the list of users in a channel
+	// Handle NAMES reply to populate channel user lists
+	// This parses the 353 numeric to get the list of users in a channel
+	numericData, ok := event.Data.(*parser.NumericData)
+	if !ok || numericData.Code != parser.NumericNamesReply {
+		return
+	}
+
+	if len(numericData.Params) < 4 {
+		return
+	}
+
+	channelName := numericData.Params[2]
+	nicks := strings.Fields(numericData.Params[3])
+
+	channel := c.state.GetChannel(channelName)
+	if channel == nil {
+		return
+	}
+
+	slog.Debug("Client: NAMES reply", "channel", channelName, "users", len(nicks))
+
+	for _, nick := range nicks {
+		// Remove prefix characters (@, +, etc.) and extract the clean nick
+		cleanNick := nick
+		var prefixChar rune
+
+		// Check for prefix characters
+		for prefix := range c.state.ServerInfo.ChannelPrefixes {
+			if len(cleanNick) > 0 && rune(cleanNick[0]) == prefix {
+				prefixChar = prefix
+				cleanNick = cleanNick[1:]
+				break
+			}
+		}
+
+		user := NewUser(cleanNick, "", "")
+
+		// Add any prefix modes if a prefix was found
+		if prefixChar != 0 {
+			if mode, exists := c.state.ServerInfo.ChannelPrefixes[prefixChar]; exists {
+				user.AddMode(mode, "")
+			}
+		}
+
+		channel.AddUser(user)
+	}
 }
 
 func (c *Client) handleNumeric(event *parser.Event) {

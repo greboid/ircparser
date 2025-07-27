@@ -158,16 +158,8 @@ func (c *Connection) readLoop() {
 
 		line, err := c.reader.ReadString('\n')
 		if err != nil {
-			if c.getState() != StateDisconnecting {
-				slog.Error("Read error in connection", "host", c.config.Host(), "error", err)
-				c.eventBus.Emit(&Event{
-					Type: EventDisconnected,
-					Data: &DisconnectedData{
-						Reason: "read error",
-						Error:  err,
-					},
-				})
-			}
+			slog.Error("Read error in connection", "host", c.config.Host(), "error", err)
+			c.transitionToDisconnected("read error", err)
 			return
 		}
 
@@ -337,6 +329,27 @@ func (c *Connection) setState(state ConnectionState) {
 	c.state = state
 }
 
+// transitionToDisconnected atomically transitions to disconnected state if not already
+// disconnecting/disconnected. Returns true if transition occurred, false if already in target state.
+func (c *Connection) transitionToDisconnected(reason string, err error) bool {
+	c.stateMux.Lock()
+	if c.state == StateDisconnecting || c.state == StateDisconnected {
+		c.stateMux.Unlock()
+		return false
+	}
+	c.state = StateDisconnected
+	c.stateMux.Unlock()
+
+	c.eventBus.Emit(&Event{
+		Type: EventDisconnected,
+		Data: &DisconnectedData{
+			Reason: reason,
+			Error:  err,
+		},
+	})
+	return true
+}
+
 func (c *Connection) GetState() ConnectionState {
 	return c.getState()
 }
@@ -391,17 +404,5 @@ func (c *Connection) Wait() {
 }
 
 func (c *Connection) handleCriticalWriteError(err error) {
-	if c.getState() == StateDisconnecting || c.getState() == StateDisconnected {
-		return
-	}
-
-	c.setState(StateDisconnected)
-
-	c.eventBus.Emit(&Event{
-		Type: EventDisconnected,
-		Data: &DisconnectedData{
-			Reason: "write error",
-			Error:  err,
-		},
-	})
+	c.transitionToDisconnected("write error", err)
 }
