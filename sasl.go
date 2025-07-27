@@ -53,6 +53,14 @@ func (pm *PlainMechanism) Start() (string, error) {
 	for i := range authBytes {
 		authBytes[i] = 0
 	}
+	for i := range pm.username {
+		pm.username[i] = 0
+	}
+	for i := range pm.password {
+		pm.password[i] = 0
+	}
+	pm.username = nil
+	pm.password = nil
 	pm.complete = true
 	return encoded, nil
 }
@@ -66,13 +74,5 @@ func (pm *PlainMechanism) IsComplete() bool {
 }
 
 func (pm *PlainMechanism) Reset() {
-	for i := range pm.username {
-		pm.username[i] = 0
-	}
-	for i := range pm.password {
-		pm.password[i] = 0
-	}
-	pm.username = nil
-	pm.password = nil
 	pm.complete = false
 }
