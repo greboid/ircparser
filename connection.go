@@ -17,6 +17,7 @@ const (
 	DefaultConnTimeout    = 30 * time.Second
 	DefaultReadTimeout    = 300 * time.Second // 5 minutes
 	DefaultWriteTimeout   = 30 * time.Second
+	DefaultPingTimeout    = 60 * time.Second
 	DefaultReconnectDelay = 5 * time.Second
 	WriteFlushInterval    = 100 * time.Millisecond
 	ConnectionWorkerCount = 2

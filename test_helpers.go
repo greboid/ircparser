@@ -1,22 +1,28 @@
 package parser
 
 import (
+	"sync"
 	"time"
 )
 
 type testSender struct {
+	mu           sync.Mutex
 	sentCommands []string
 	sentParams   [][]string
 	sendError    error
 }
 
 func (ts *testSender) Send(command string, params ...string) error {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
 	ts.sentCommands = append(ts.sentCommands, command)
 	ts.sentParams = append(ts.sentParams, params)
 	return ts.sendError
 }
 
 func (ts *testSender) lastSent() (string, []string) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
 	if len(ts.sentCommands) == 0 {
 		return "", nil
 	}
@@ -25,12 +31,15 @@ func (ts *testSender) lastSent() (string, []string) {
 }
 
 func (ts *testSender) reset() {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
 	ts.sentCommands = nil
 	ts.sentParams = nil
 	ts.sendError = nil
 }
 
 type testSubscriber struct {
+	mu            sync.Mutex
 	subscriptions map[EventType][]EventHandler
 }
 
@@ -41,19 +50,25 @@ func newTestSubscriber() *testSubscriber {
 }
 
 func (ts *testSubscriber) Subscribe(eventType EventType, handler EventHandler) int {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
 	ts.subscriptions[eventType] = append(ts.subscriptions[eventType], handler)
 	return len(ts.subscriptions[eventType]) - 1
 }
 
 func (ts *testSubscriber) emit(event *Event) {
-	if handlers, exists := ts.subscriptions[event.Type]; exists {
-		for _, handler := range handlers {
-			handler(event)
-		}
+	ts.mu.Lock()
+	handlers := make([]EventHandler, len(ts.subscriptions[event.Type]))
+	copy(handlers, ts.subscriptions[event.Type])
+	ts.mu.Unlock()
+
+	for _, handler := range handlers {
+		handler(event)
 	}
 }
 
 type testEmitter struct {
+	mu            sync.Mutex
 	emittedEvents []*Event
 }
 
@@ -64,10 +79,14 @@ func newTestEmitter() *testEmitter {
 }
 
 func (te *testEmitter) Emit(event *Event) {
+	te.mu.Lock()
+	defer te.mu.Unlock()
 	te.emittedEvents = append(te.emittedEvents, event)
 }
 
 func (te *testEmitter) lastEmitted() *Event {
+	te.mu.Lock()
+	defer te.mu.Unlock()
 	if len(te.emittedEvents) == 0 {
 		return nil
 	}
@@ -75,6 +94,8 @@ func (te *testEmitter) lastEmitted() *Event {
 }
 
 func (te *testEmitter) reset() {
+	te.mu.Lock()
+	defer te.mu.Unlock()
 	te.emittedEvents = make([]*Event, 0)
 }
 

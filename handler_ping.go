@@ -7,10 +7,6 @@ import (
 	"time"
 )
 
-const (
-	DefaultPingTimeout = 60 * time.Second
-)
-
 type PingHandler struct {
 	send         func(command string, params ...string) error
 	emit         func(event *Event)

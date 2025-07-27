@@ -1147,9 +1147,12 @@ func TestCapabilitiesHandler_CheckEndNegotiation_EndError(t *testing.T) {
 	handler.setNegotiating(true)
 
 	// Create a custom sender that records attempts and fails on CAP END
+	var sendAttemptsMu sync.Mutex
 	sendAttempts := make([]string, 0)
 	handler.send = func(command string, params ...string) error {
+		sendAttemptsMu.Lock()
 		sendAttempts = append(sendAttempts, command+" "+strings.Join(params, " "))
+		sendAttemptsMu.Unlock()
 		if command == "CAP" && len(params) > 0 && params[0] == "END" {
 			return errors.New("end failed")
 		}
@@ -1179,7 +1182,16 @@ func TestCapabilitiesHandler_CheckEndNegotiation_EndError(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Should have tried to send CAP END and failed
-	assert.Contains(t, sendAttempts, "CAP END")
+	sendAttemptsMu.Lock()
+	assertContains := false
+	for _, attempt := range sendAttempts {
+		if attempt == "CAP END" {
+			assertContains = true
+			break
+		}
+	}
+	sendAttemptsMu.Unlock()
+	assert.True(t, assertContains, "Expected sendAttempts to contain 'CAP END'")
 
 	// Should still be negotiating since send failed
 	assert.True(t, handler.isNegotiating())
