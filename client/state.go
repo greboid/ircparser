@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/greboid/ircparser/pkg/parser"
+	"github.com/greboid/ircparser/parser"
 )
 
 // UserMode represents a user mode with its character and parameter

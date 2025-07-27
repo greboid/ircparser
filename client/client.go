@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/greboid/ircparser/pkg/parser"
+	"github.com/greboid/ircparser/parser"
 )
 
 // Client provides a high-level IRC client interface with comprehensive state tracking
