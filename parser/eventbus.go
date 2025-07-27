@@ -119,8 +119,6 @@ func (eb *EventBus) Emit(event *Event) {
 	select {
 	case eb.eventCh <- event:
 	case <-eb.ctx.Done():
-	default:
-		slog.Warn("EventBus channel full, dropping event", "event_type", event.Type)
 	}
 }
 
