@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -48,13 +49,14 @@ func main() {
 			parser.WithSASL(*saslusername, *saslpassword),
 		),
 	)
-	channels := 0
-	cli.Subscribe(parser.EventJoin, func(event *parser.Event) {
-		if joinData, ok := event.Data.(*parser.JoinData); ok {
-			fmt.Println("Joined: " + joinData.Nick + " " + joinData.Channel)
-			if joinData.Nick == cli.GetCurrentNick() {
-				channels++
+	cli.Subscribe(parser.EventNamesComplete, func(event *parser.Event) {
+		if data, ok := event.Data.(*parser.NamesCompleteData); ok {
+			userNames := make([]string, 0, len(data.Channel.GetUsers()))
+			for _, user := range data.Channel.GetUsers() {
+				prefixes := user.GetPrefixString(cli.GetChannelPrefixes())
+				userNames = append(userNames, fmt.Sprintf("%s%s", prefixes, user.Nick))
 			}
+			fmt.Printf("%s:= %s\n", data.Channel.Name, strings.Join(userNames, ", "))
 		}
 	})
 	go func() {

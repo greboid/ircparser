@@ -71,47 +71,48 @@ const (
 type EventType string
 
 const (
-	EventConnected    EventType = "connected"
-	EventDisconnected EventType = "disconnected"
-	EventMessage      EventType = "message"
-	EventPing         EventType = "ping"
-	EventPong         EventType = "pong"
-	EventError        EventType = "error"
-	EventCapLS        EventType = "cap_ls"
-	EventCapACK       EventType = "cap_ack"
-	EventCapNAK       EventType = "cap_nak"
-	EventCapDEL       EventType = "cap_del"
-	EventCapNEW       EventType = "cap_new"
-	EventCapAdded     EventType = "cap_added"
-	EventCapRemoved   EventType = "cap_removed"
-	EventCapPreEnd    EventType = "cap_pre_end"
-	EventCapEndReady  EventType = "cap_end_ready"
-	EventCapEnd       EventType = "cap_end"
-	EventSASLAuth     EventType = "sasl_auth"
-	EventSASLSuccess  EventType = "sasl_success"
-	EventSASLFail     EventType = "sasl_fail"
-	EventRegistered   EventType = "registered"
-	EventNick         EventType = "nick"
-	EventJoin         EventType = "join"
-	EventPart         EventType = "part"
-	EventQuit         EventType = "quit"
-	EventKick         EventType = "kick"
-	EventMode         EventType = "mode"
-	EventTopic        EventType = "topic"
-	EventPrivmsg      EventType = "privmsg"
-	EventNotice       EventType = "notice"
-	EventInvite       EventType = "invite"
-	EventWhois        EventType = "whois"
-	EventWho          EventType = "who"
-	EventList         EventType = "list"
-	EventNames        EventType = "names"
-	EventCTCP         EventType = "ctcp"
-	EventCTCPReply    EventType = "ctcp_reply"
-	EventAction       EventType = "action"
-	EventNumeric      EventType = "numeric"
-	EventRawIncoming  EventType = "raw_incoming"
-	EventRawOutgoing  EventType = "raw_outgoing"
-	EventUnknown      EventType = "unknown"
+	EventConnected     EventType = "connected"
+	EventDisconnected  EventType = "disconnected"
+	EventMessage       EventType = "message"
+	EventPing          EventType = "ping"
+	EventPong          EventType = "pong"
+	EventError         EventType = "error"
+	EventCapLS         EventType = "cap_ls"
+	EventCapACK        EventType = "cap_ack"
+	EventCapNAK        EventType = "cap_nak"
+	EventCapDEL        EventType = "cap_del"
+	EventCapNEW        EventType = "cap_new"
+	EventCapAdded      EventType = "cap_added"
+	EventCapRemoved    EventType = "cap_removed"
+	EventCapPreEnd     EventType = "cap_pre_end"
+	EventCapEndReady   EventType = "cap_end_ready"
+	EventCapEnd        EventType = "cap_end"
+	EventSASLAuth      EventType = "sasl_auth"
+	EventSASLSuccess   EventType = "sasl_success"
+	EventSASLFail      EventType = "sasl_fail"
+	EventRegistered    EventType = "registered"
+	EventNick          EventType = "nick"
+	EventJoin          EventType = "join"
+	EventPart          EventType = "part"
+	EventQuit          EventType = "quit"
+	EventKick          EventType = "kick"
+	EventMode          EventType = "mode"
+	EventTopic         EventType = "topic"
+	EventPrivmsg       EventType = "privmsg"
+	EventNotice        EventType = "notice"
+	EventInvite        EventType = "invite"
+	EventWhois         EventType = "whois"
+	EventWho           EventType = "who"
+	EventList          EventType = "list"
+	EventNames         EventType = "names"
+	EventNamesComplete EventType = "names_complete"
+	EventCTCP          EventType = "ctcp"
+	EventCTCPReply     EventType = "ctcp_reply"
+	EventAction        EventType = "action"
+	EventNumeric       EventType = "numeric"
+	EventRawIncoming   EventType = "raw_incoming"
+	EventRawOutgoing   EventType = "raw_outgoing"
+	EventUnknown       EventType = "unknown"
 )
 
 type Event struct {
@@ -194,7 +195,7 @@ func DetermineEventType(msg *Message) []EventType {
 	case NumericListStart, NumericList, NumericListEnd:
 		return []EventType{EventList}
 	case NumericNamesReply, NumericNamesEnd:
-		return []EventType{EventNames}
+		return []EventType{EventNames, EventNumeric}
 	default:
 		if msg.IsNumeric() {
 			return []EventType{EventNumeric}
@@ -314,6 +315,10 @@ type ActionData struct {
 	Target  string
 	Nick    string
 	Message string
+}
+
+type NamesCompleteData struct {
+	Channel *Channel // Channel object
 }
 
 type NumericData struct {

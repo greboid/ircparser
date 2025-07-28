@@ -304,6 +304,10 @@ func (p *Parser) UnsubscribeByID(eventType EventType, id int) {
 	p.eventBus.UnsubscribeByID(eventType, id)
 }
 
+func (p *Parser) EmitEvent(event *Event) {
+	p.eventBus.Emit(event)
+}
+
 func (p *Parser) Wait() {
 	p.wg.Wait()
 	p.connection.Wait()
