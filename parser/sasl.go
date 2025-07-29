@@ -536,7 +536,7 @@ func (sh *SASLHandler) sendAuthData(data string) {
 	}
 }
 
-func (sh *SASLHandler) HandleSASLSuccess(event *Event) {
+func (sh *SASLHandler) HandleSASLSuccess(*Event) {
 	if !sh.IsActive() {
 		return
 	}

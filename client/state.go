@@ -206,8 +206,8 @@ func parseInt(s string) int {
 	return 0
 }
 
-// ClientState represents the complete state of an IRC client
-type ClientState struct {
+// State represents the complete state of an IRC client
+type State struct {
 	// Connection state
 	ConnectionState parser.ConnectionState
 
@@ -230,8 +230,8 @@ type ClientState struct {
 	channelsMux sync.RWMutex
 }
 
-func NewClientState() *ClientState {
-	return &ClientState{
+func NewClientState() *State {
+	return &State{
 		ConnectionState: parser.StateDisconnected,
 		ServerInfo:      NewServerInfo(),
 		Channels:        make(map[string]*parser.Channel),
@@ -239,81 +239,77 @@ func NewClientState() *ClientState {
 	}
 }
 
-// Connection state methods
-func (cs *ClientState) SetConnectionState(state parser.ConnectionState) {
+func (cs *State) SetConnectionState(state parser.ConnectionState) {
 	cs.connMux.Lock()
 	defer cs.connMux.Unlock()
 	cs.ConnectionState = state
 }
 
-func (cs *ClientState) GetConnectionState() parser.ConnectionState {
+func (cs *State) GetConnectionState() parser.ConnectionState {
 	cs.connMux.RLock()
 	defer cs.connMux.RUnlock()
 	return cs.ConnectionState
 }
 
-func (cs *ClientState) IsConnected() bool {
+func (cs *State) IsConnected() bool {
 	state := cs.GetConnectionState()
 	return state == parser.StateConnected || state == parser.StateRegistered
 }
 
-func (cs *ClientState) IsRegistered() bool {
+func (cs *State) IsRegistered() bool {
 	return cs.GetConnectionState() == parser.StateRegistered
 }
 
-// User identity methods
-func (cs *ClientState) SetCurrentNick(nick string) {
+func (cs *State) SetCurrentNick(nick string) {
 	cs.userMux.Lock()
 	defer cs.userMux.Unlock()
 	cs.CurrentNick = nick
 }
 
-func (cs *ClientState) GetCurrentNick() string {
+func (cs *State) GetCurrentNick() string {
 	cs.userMux.RLock()
 	defer cs.userMux.RUnlock()
 	return cs.CurrentNick
 }
 
-func (cs *ClientState) SetPreferredNick(nick string) {
+func (cs *State) SetPreferredNick(nick string) {
 	cs.userMux.Lock()
 	defer cs.userMux.Unlock()
 	cs.PreferredNick = nick
 }
 
-func (cs *ClientState) GetPreferredNick() string {
+func (cs *State) GetPreferredNick() string {
 	cs.userMux.RLock()
 	defer cs.userMux.RUnlock()
 	return cs.PreferredNick
 }
 
-func (cs *ClientState) SetUserInfo(username, realname string) {
+func (cs *State) SetUserInfo(username, realname string) {
 	cs.userMux.Lock()
 	defer cs.userMux.Unlock()
 	cs.Username = username
 	cs.Realname = realname
 }
 
-func (cs *ClientState) GetUserInfo() (string, string) {
+func (cs *State) GetUserInfo() (string, string) {
 	cs.userMux.RLock()
 	defer cs.userMux.RUnlock()
 	return cs.Username, cs.Realname
 }
 
-func (cs *ClientState) AddUserMode(mode rune, parameter string) {
+func (cs *State) AddUserMode(mode rune, parameter string) {
 	cs.userMux.Lock()
 	defer cs.userMux.Unlock()
-	// Remove existing mode if present
 	for i, m := range cs.UserModes {
 		if m.Mode == mode {
 			cs.UserModes[i] = parser.UserMode{Mode: mode, Parameter: parameter}
 			return
 		}
 	}
-	// Add new mode
 	cs.UserModes = append(cs.UserModes, parser.UserMode{Mode: mode, Parameter: parameter})
 }
 
-func (cs *ClientState) RemoveUserMode(mode rune) {
+func (cs *State) RemoveUserMode(mode rune) {
 	cs.userMux.Lock()
 	defer cs.userMux.Unlock()
 	for i, m := range cs.UserModes {
@@ -324,7 +320,7 @@ func (cs *ClientState) RemoveUserMode(mode rune) {
 	}
 }
 
-func (cs *ClientState) HasUserMode(mode rune) bool {
+func (cs *State) HasUserMode(mode rune) bool {
 	cs.userMux.RLock()
 	defer cs.userMux.RUnlock()
 	for _, m := range cs.UserModes {
@@ -335,7 +331,7 @@ func (cs *ClientState) HasUserMode(mode rune) bool {
 	return false
 }
 
-func (cs *ClientState) GetUserModes() []parser.UserMode {
+func (cs *State) GetUserModes() []parser.UserMode {
 	cs.userMux.RLock()
 	defer cs.userMux.RUnlock()
 	modes := make([]parser.UserMode, len(cs.UserModes))
@@ -343,26 +339,25 @@ func (cs *ClientState) GetUserModes() []parser.UserMode {
 	return modes
 }
 
-// Channel methods
-func (cs *ClientState) AddChannel(channel *parser.Channel) {
+func (cs *State) AddChannel(channel *parser.Channel) {
 	cs.channelsMux.Lock()
 	defer cs.channelsMux.Unlock()
 	cs.Channels[channel.Name] = channel
 }
 
-func (cs *ClientState) RemoveChannel(name string) {
+func (cs *State) RemoveChannel(name string) {
 	cs.channelsMux.Lock()
 	defer cs.channelsMux.Unlock()
 	delete(cs.Channels, name)
 }
 
-func (cs *ClientState) GetChannel(name string) *parser.Channel {
+func (cs *State) GetChannel(name string) *parser.Channel {
 	cs.channelsMux.RLock()
 	defer cs.channelsMux.RUnlock()
 	return cs.Channels[name]
 }
 
-func (cs *ClientState) GetChannels() map[string]*parser.Channel {
+func (cs *State) GetChannels() map[string]*parser.Channel {
 	cs.channelsMux.RLock()
 	defer cs.channelsMux.RUnlock()
 	channels := make(map[string]*parser.Channel, len(cs.Channels))
@@ -372,7 +367,7 @@ func (cs *ClientState) GetChannels() map[string]*parser.Channel {
 	return channels
 }
 
-func (cs *ClientState) GetChannelNames() []string {
+func (cs *State) GetChannelNames() []string {
 	cs.channelsMux.RLock()
 	defer cs.channelsMux.RUnlock()
 	names := make([]string, 0, len(cs.Channels))
@@ -382,15 +377,14 @@ func (cs *ClientState) GetChannelNames() []string {
 	return names
 }
 
-func (cs *ClientState) IsInChannel(name string) bool {
+func (cs *State) IsInChannel(name string) bool {
 	cs.channelsMux.RLock()
 	defer cs.channelsMux.RUnlock()
 	_, exists := cs.Channels[name]
 	return exists
 }
 
-// Clear all state (for disconnect/reset)
-func (cs *ClientState) Reset() {
+func (cs *State) Reset() {
 	cs.connMux.Lock()
 	cs.userMux.Lock()
 	cs.channelsMux.Lock()

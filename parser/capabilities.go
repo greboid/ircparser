@@ -310,7 +310,7 @@ func (ch *CapabilitiesHandler) EndCapabilityNegotiation() error {
 	return nil
 }
 
-func (ch *CapabilitiesHandler) HandleCapEnd(event *Event) {
+func (ch *CapabilitiesHandler) HandleCapEnd(*Event) {
 	slog.Debug("Handlers signaled completion")
 
 	err := ch.send("CAP", "END")
@@ -323,7 +323,7 @@ func (ch *CapabilitiesHandler) HandleCapEnd(event *Event) {
 	slog.Debug("Capability negotiation ended")
 }
 
-func (ch *CapabilitiesHandler) HandleCapEndReady(event *Event) {
+func (ch *CapabilitiesHandler) HandleCapEndReady(*Event) {
 	select {
 	case ch.readyCh <- struct{}{}:
 		slog.Debug("Handler signaled ready for cap end")

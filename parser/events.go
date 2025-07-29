@@ -6,66 +6,45 @@ import (
 	"time"
 )
 
-// Event system constants
 const (
 	DefaultEventChannelBuffer = 100
 	PanicStackBufferSize      = 1024
+	
+	CTCPDelimiter = '\x01'
+	MinCTCPLength = 2
+
+	ServerTimeFormat = "2006-01-02T15:04:05.000Z"
+	ServerTimeTag    = "time"
 )
 
-// IRC numeric codes
 const (
-	NumericWelcome      = "001"
-	NumericISupport     = "005"
-	NumericSASLSuccess1 = "900"
-	NumericSASLSuccess2 = "903"
-	NumericSASLFail1    = "901"
-	NumericSASLFail2    = "902"
-	NumericSASLFail3    = "904"
-	NumericSASLFail4    = "905"
-	NumericSASLFail5    = "906"
-	NumericSASLFail6    = "907"
-	NumericSASLFail7    = "908"
-)
-
-// WHOIS numeric codes
-const (
+	NumericWelcome       = "001"
+	NumericISupport      = "005"
+	NumericSASLSuccess1  = "900"
+	NumericSASLSuccess2  = "903"
+	NumericSASLFail1     = "901"
+	NumericSASLFail2     = "902"
+	NumericSASLFail3     = "904"
+	NumericSASLFail4     = "905"
+	NumericSASLFail5     = "906"
+	NumericSASLFail6     = "907"
+	NumericSASLFail7     = "908"
 	NumericWhoisUser     = "311"
 	NumericWhoisServer   = "312"
 	NumericWhoisOperator = "313"
 	NumericWhoisIdle     = "317"
 	NumericWhoisEnd      = "318"
 	NumericWhoisChannels = "319"
-)
-
-// WHO numeric codes
-const (
-	NumericWhoReply = "352"
-	NumericWhoEnd   = "315"
-)
-
-// LIST numeric codes
-const (
-	NumericListStart = "321"
-	NumericList      = "322"
-	NumericListEnd   = "323"
-)
-
-// NAMES numeric codes
-const (
-	NumericNamesReply = "353"
-	NumericNamesEnd   = "366"
-)
-
-// CTCP constants
-const (
-	CTCPDelimiter = '\x01'
-	MinCTCPLength = 2
-)
-
-// IRCv3 server-time constants
-const (
-	ServerTimeFormat = "2006-01-02T15:04:05.000Z"
-	ServerTimeTag    = "time"
+	NumericWhoReply      = "352"
+	NumericWhoEnd        = "315"
+	NumericListStart     = "321"
+	NumericList          = "322"
+	NumericListEnd       = "323"
+	NumericNamesReply    = "353"
+	NumericNamesEnd      = "366"
+	NumericTopic         = "332"
+	NumericTopicInfo     = "333"
+	NumericNickInUse     = "433"
 )
 
 type EventType string

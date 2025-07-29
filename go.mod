@@ -5,7 +5,6 @@ go 1.24.5
 require (
 	github.com/csmith/envflag/v2 v2.0.0
 	github.com/csmith/slogflags v1.1.0
-	github.com/stretchr/testify v1.10.0
 )
 
 require (

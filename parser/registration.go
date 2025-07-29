@@ -212,7 +212,7 @@ func (rh *RegistrationHandler) HandleNumeric(event *Event) {
 		return
 	}
 
-	if numericData.Code == "433" {
+	if numericData.Code == NumericNickInUse {
 		newNick := rh.config.Nick() + "_"
 		slog.Info("Nick in use, trying with underscore", "current_nick", rh.config.Nick(), "new_nick", newNick)
 		if err := rh.send("NICK", newNick); err != nil {

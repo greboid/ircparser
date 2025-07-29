@@ -13,7 +13,7 @@ import (
 // Client provides a high-level IRC client interface with comprehensive state tracking
 type Client struct {
 	parser *parser.Parser
-	state  *ClientState
+	state  *State
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -56,7 +56,6 @@ func (c *Client) Stop() {
 	c.cancel()
 }
 
-// Connection state methods
 func (c *Client) IsConnected() bool {
 	return c.state.IsConnected()
 }
@@ -69,7 +68,6 @@ func (c *Client) GetConnectionState() parser.ConnectionState {
 	return c.state.GetConnectionState()
 }
 
-// User identity methods
 func (c *Client) GetCurrentNick() string {
 	return c.state.GetCurrentNick()
 }
@@ -90,7 +88,6 @@ func (c *Client) HasUserMode(mode rune) bool {
 	return c.state.HasUserMode(mode)
 }
 
-// Channel state methods
 func (c *Client) GetChannels() map[string]*parser.Channel {
 	return c.state.GetChannels()
 }
@@ -107,7 +104,6 @@ func (c *Client) IsInChannel(name string) bool {
 	return c.state.IsInChannel(name)
 }
 
-// Server information methods
 func (c *Client) GetServerInfo() *ServerInfo {
 	return c.state.ServerInfo
 }
@@ -156,7 +152,6 @@ func (c *Client) HasCapability(cap string) bool {
 	return c.state.ServerInfo.HasCapability(cap)
 }
 
-// IRC command methods - delegate to parser
 func (c *Client) Join(channel string) error {
 	return c.parser.Join(channel)
 }
@@ -221,7 +216,6 @@ func (c *Client) Send(command string, params ...string) error {
 	return c.parser.Send(command, params...)
 }
 
-// Event subscription methods
 func (c *Client) Subscribe(eventType parser.EventType, handler parser.EventHandler) int {
 	return c.parser.Subscribe(eventType, handler)
 }
@@ -230,57 +224,47 @@ func (c *Client) UnsubscribeByID(eventType parser.EventType, id int) {
 	c.parser.UnsubscribeByID(eventType, id)
 }
 
-// Wait blocks until the client is finished
 func (c *Client) Wait() {
 	c.parser.Wait()
 }
 
-// emitEvent emits an event through the parser's event bus
 func (c *Client) emitEvent(event *parser.Event) {
-	// Access the parser's event bus to emit the event
-	// We need to add a method to the parser to expose this functionality
 	c.parser.EmitEvent(event)
 }
 
-// setupEventHandlers sets up event handlers for state tracking
 func (c *Client) setupEventHandlers() {
-	// Connection state tracking
 	c.parser.Subscribe(parser.EventConnected, c.handleConnected)
 	c.parser.Subscribe(parser.EventDisconnected, c.handleDisconnected)
 	c.parser.Subscribe(parser.EventRegistered, c.handleRegistered)
 
-	// User state tracking
 	c.parser.Subscribe(parser.EventNick, c.handleNick)
 	c.parser.Subscribe(parser.EventMode, c.handleMode)
 
-	// Channel state tracking
 	c.parser.Subscribe(parser.EventJoin, c.handleJoin)
 	c.parser.Subscribe(parser.EventPart, c.handlePart)
 	c.parser.Subscribe(parser.EventQuit, c.handleQuit)
 	c.parser.Subscribe(parser.EventKick, c.handleKick)
 	c.parser.Subscribe(parser.EventTopic, c.handleTopic)
 
-	// Server info tracking
 	c.parser.Subscribe(parser.EventNumeric, c.handleNumeric)
 	c.parser.Subscribe(parser.EventCapAdded, c.handleCapAdded)
 	c.parser.Subscribe(parser.EventCapRemoved, c.handleCapRemoved)
 }
 
-func (c *Client) handleConnected(event *parser.Event) {
+func (c *Client) handleConnected(*parser.Event) {
 	slog.Debug("Client: Connected to server")
 	c.state.SetConnectionState(parser.StateConnected)
 }
 
-func (c *Client) handleDisconnected(event *parser.Event) {
+func (c *Client) handleDisconnected(*parser.Event) {
 	slog.Debug("Client: Disconnected from server")
 	c.state.SetConnectionState(parser.StateDisconnected)
-	// Clear channel state on disconnect
 	c.state.channelsMux.Lock()
 	c.state.Channels = make(map[string]*parser.Channel)
 	c.state.channelsMux.Unlock()
 }
 
-func (c *Client) handleRegistered(event *parser.Event) {
+func (c *Client) handleRegistered(*parser.Event) {
 	slog.Debug("Client: Registration completed")
 	c.state.SetConnectionState(parser.StateRegistered)
 }
@@ -293,12 +277,10 @@ func (c *Client) handleNick(event *parser.Event) {
 
 	slog.Debug("Client: Nick change", "old_nick", nickData.OldNick, "new_nick", nickData.NewNick)
 
-	// Update our nick if it's us
 	if nickData.OldNick == c.state.GetCurrentNick() {
 		c.state.SetCurrentNick(nickData.NewNick)
 	}
 
-	// Update nick in all channels
 	for _, channel := range c.state.GetChannels() {
 		channel.RenameUser(nickData.OldNick, nickData.NewNick)
 	}
@@ -312,7 +294,6 @@ func (c *Client) handleMode(event *parser.Event) {
 
 	slog.Debug("Client: Mode change", "target", modeData.Target, "modes", modeData.Modes, "args", modeData.Args)
 
-	// Parse mode changes
 	adding := true
 	argIndex := 0
 
@@ -329,14 +310,11 @@ func (c *Client) handleMode(event *parser.Event) {
 				argIndex++
 			}
 
-			// Check if this is a user mode or channel mode
 			if strings.HasPrefix(modeData.Target, "#") || strings.HasPrefix(modeData.Target, "&") {
-				// Channel mode
 				channel := c.state.GetChannel(modeData.Target)
 				if channel != nil {
 					if adding {
 						channel.AddMode(char, parameter)
-						// Handle user modes in channel (op, voice, etc.)
 						if parameter != "" {
 							user := channel.GetUser(parameter)
 							if user != nil {
@@ -354,7 +332,6 @@ func (c *Client) handleMode(event *parser.Event) {
 					}
 				}
 			} else if modeData.Target == c.state.GetCurrentNick() {
-				// User mode for us
 				if adding {
 					c.state.AddUserMode(char, parameter)
 				} else {
@@ -374,15 +351,12 @@ func (c *Client) handleJoin(event *parser.Event) {
 	slog.Debug("Client: User joined channel", "nick", joinData.Nick, "channel", joinData.Channel)
 
 	if joinData.Nick == c.state.GetCurrentNick() {
-		// We joined a channel
 		channel := parser.NewChannel(joinData.Channel)
 		c.state.AddChannel(channel)
 
-		// Add ourselves to the channel
 		user := parser.NewUser(joinData.Nick, "", "")
 		channel.AddUser(user)
 	} else {
-		// Someone else joined a channel we're in
 		channel := c.state.GetChannel(joinData.Channel)
 		if channel != nil {
 			user := parser.NewUser(joinData.Nick, "", "")
@@ -400,10 +374,8 @@ func (c *Client) handlePart(event *parser.Event) {
 	slog.Debug("Client: User parted channel", "nick", partData.Nick, "channel", partData.Channel, "reason", partData.Reason)
 
 	if partData.Nick == c.state.GetCurrentNick() {
-		// We parted a channel
 		c.state.RemoveChannel(partData.Channel)
 	} else {
-		// Someone else parted a channel we're in
 		channel := c.state.GetChannel(partData.Channel)
 		if channel != nil {
 			channel.RemoveUser(partData.Nick)
@@ -419,7 +391,6 @@ func (c *Client) handleQuit(event *parser.Event) {
 
 	slog.Debug("Client: User quit", "nick", quitData.Nick, "reason", quitData.Reason)
 
-	// Remove user from all channels
 	for _, channel := range c.state.GetChannels() {
 		channel.RemoveUser(quitData.Nick)
 	}
@@ -434,10 +405,8 @@ func (c *Client) handleKick(event *parser.Event) {
 	slog.Debug("Client: User kicked from channel", "kicked", kickData.Kicked, "channel", kickData.Channel, "by", kickData.Nick, "reason", kickData.Reason)
 
 	if kickData.Kicked == c.state.GetCurrentNick() {
-		// We were kicked from a channel
 		c.state.RemoveChannel(kickData.Channel)
 	} else {
-		// Someone else was kicked from a channel we're in
 		channel := c.state.GetChannel(kickData.Channel)
 		if channel != nil {
 			channel.RemoveUser(kickData.Kicked)
@@ -460,8 +429,6 @@ func (c *Client) handleTopic(event *parser.Event) {
 }
 
 func (c *Client) handleNames(event *parser.Event) {
-	// Handle NAMES reply to populate channel user lists
-	// This parses the 353 numeric to get the list of users in a channel
 	numericData, ok := event.Data.(*parser.NumericData)
 	if !ok || numericData.Code != parser.NumericNamesReply {
 		return
@@ -476,7 +443,6 @@ func (c *Client) handleNames(event *parser.Event) {
 
 	channel := c.state.GetChannel(channelName)
 	if channel == nil {
-		// Channel doesn't exist in our state, create it
 		channel = parser.NewChannel(channelName)
 		c.state.AddChannel(channel)
 	}
@@ -484,11 +450,9 @@ func (c *Client) handleNames(event *parser.Event) {
 	slog.Debug("Client: NAMES reply", "channel", channelName, "users", len(nicks))
 
 	for _, nick := range nicks {
-		// Handle multiple prefix characters (e.g., "@+nick" for ops with voice)
 		cleanNick := nick
 		var userModes []rune
 
-		// Extract all prefix characters
 		for len(cleanNick) > 0 {
 			firstChar := rune(cleanNick[0])
 			if mode, exists := c.state.ServerInfo.ChannelPrefixes[firstChar]; exists {
@@ -499,14 +463,12 @@ func (c *Client) handleNames(event *parser.Event) {
 			}
 		}
 
-		// Skip empty nicks
 		if cleanNick == "" {
 			continue
 		}
 
 		user := parser.NewUser(cleanNick, "", "")
 
-		// Add all prefix modes found
 		for _, mode := range userModes {
 			user.AddMode(mode, "")
 		}
@@ -516,8 +478,6 @@ func (c *Client) handleNames(event *parser.Event) {
 }
 
 func (c *Client) handleNamesEnd(event *parser.Event) {
-	// Handle end of NAMES reply (366 numeric)
-	// This indicates that all users for a channel have been sent
 	numericData, ok := event.Data.(*parser.NumericData)
 	if !ok {
 		slog.Debug("Client: handleNamesEnd data not NumericData", "event_type", event.Type, "data_type", fmt.Sprintf("%T", event.Data))
@@ -540,7 +500,6 @@ func (c *Client) handleNamesEnd(event *parser.Event) {
 
 		slog.Debug("Client: About to emit EventNamesComplete", "channel", channelName, "user_count", channel.GetUserCount())
 
-		// Create and emit NamesComplete event
 		namesCompleteEvent := &parser.Event{
 			Type:    parser.EventNamesComplete,
 			Message: event.Message,
@@ -550,7 +509,6 @@ func (c *Client) handleNamesEnd(event *parser.Event) {
 			Time: event.Time,
 		}
 
-		// Emit the event using the parser's event bus
 		c.emitEvent(namesCompleteEvent)
 		slog.Debug("Client: EventNamesComplete emitted")
 	} else {
@@ -567,8 +525,7 @@ func (c *Client) handleNumeric(event *parser.Event) {
 	slog.Debug("Client: handleNumeric called", "code", numericData.Code)
 
 	switch numericData.Code {
-	case parser.NumericISupport: // 005
-		// Parse ISUPPORT
+	case parser.NumericISupport:
 		for i := 1; i < len(numericData.Params)-1; i++ {
 			param := numericData.Params[i]
 			if strings.Contains(param, "=") {
@@ -580,7 +537,7 @@ func (c *Client) handleNumeric(event *parser.Event) {
 		}
 		slog.Debug("Client: Updated ISUPPORT", "feature_count", len(c.state.ServerInfo.ISupport))
 
-	case "332": // Topic
+	case parser.NumericTopic:
 		if len(numericData.Params) >= 3 {
 			channelName := numericData.Params[1]
 			topic := numericData.Params[2]
@@ -590,21 +547,20 @@ func (c *Client) handleNumeric(event *parser.Event) {
 			}
 		}
 
-	case "333": // Topic info
+	case parser.NumericTopicInfo:
 		if len(numericData.Params) >= 4 {
 			channelName := numericData.Params[1]
 			topicBy := numericData.Params[2]
-			// Parse timestamp if available
 			channel := c.state.GetChannel(channelName)
 			if channel != nil {
 				channel.TopicBy = topicBy
 			}
 		}
 
-	case parser.NumericNamesReply: // 353
+	case parser.NumericNamesReply:
 		c.handleNames(event)
 
-	case parser.NumericNamesEnd: // 366
+	case parser.NumericNamesEnd:
 		c.handleNamesEnd(event)
 	}
 }
