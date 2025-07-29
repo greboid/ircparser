@@ -117,6 +117,26 @@ func (c *Client) GetMaxTopicLength() int {
 }
 
 func (c *Client) GetMaxChannels() int {
+	// Check if CHANLIMIT provides specific limits per channel type
+	if len(c.state.ServerInfo.ChannelLimits) > 0 {
+		total := 0
+		for _, limit := range c.state.ServerInfo.ChannelLimits {
+			total += limit
+		}
+		return total
+	}
+
+	// Fall back to general MaxChannels limit
+	return c.state.ServerInfo.MaxChannels
+}
+
+func (c *Client) GetMaxChannelsForType(channelPrefix rune) int {
+	// Check if CHANLIMIT provides specific limit for this channel type
+	if limit, exists := c.state.ServerInfo.ChannelLimits[channelPrefix]; exists {
+		return limit
+	}
+
+	// Fall back to general MaxChannels limit
 	return c.state.ServerInfo.MaxChannels
 }
 

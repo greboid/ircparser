@@ -22,6 +22,9 @@ type ServerInfo struct {
 	UserModes       map[rune]string // mode -> descriptionw
 	ChannelPrefixes map[rune]rune   // prefix -> mode (e.g., '@' -> 'o')
 
+	// Channel limits per prefix type (e.g., '#' -> 20, '&' -> 10)
+	ChannelLimits map[rune]int
+
 	// Network info
 	NetworkName string
 	CaseMapping string
@@ -45,6 +48,7 @@ func NewServerInfo() *ServerInfo {
 		ChannelModes:    make(map[rune]string),
 		UserModes:       make(map[rune]string),
 		ChannelPrefixes: make(map[rune]rune),
+		ChannelLimits:   make(map[rune]int),
 		ISupport:        make(map[string]string),
 		Capabilities:    make(map[string]string),
 		CaseMapping:     "ascii",
@@ -67,6 +71,12 @@ func (si *ServerInfo) SetISupport(key, value string) {
 	case "CHANNELLEN":
 		if len(value) > 0 {
 			if val := parseInt(value); val > 0 {
+				si.MaxChannels = val
+			}
+		}
+	case "LINELEN":
+		if len(value) > 0 {
+			if val := parseInt(value); val > 0 {
 				si.MaxLineLength = val
 			}
 		}
@@ -76,7 +86,7 @@ func (si *ServerInfo) SetISupport(key, value string) {
 				si.MaxTopicLength = val
 			}
 		}
-	case "CHANLIMIT":
+	case "MAXCHANNELS":
 		if len(value) > 0 {
 			if val := parseInt(value); val > 0 {
 				si.MaxChannels = val
@@ -102,6 +112,8 @@ func (si *ServerInfo) SetISupport(key, value string) {
 		si.parseChannelModes(value)
 	case "PREFIX":
 		si.parseChannelPrefixes(value)
+	case "CHANLIMIT":
+		si.parseChannelLimits(value)
 	}
 }
 
@@ -204,6 +216,43 @@ func (si *ServerInfo) parseChannelPrefixes(value string) {
 	// Map each prefix to its corresponding mode
 	for i := 0; i < len(modes); i++ {
 		si.ChannelPrefixes[rune(prefixes[i])] = rune(modes[i])
+	}
+}
+
+func (si *ServerInfo) parseChannelLimits(value string) {
+	// Parse CHANLIMIT value (e.g., "#:20,&:10")
+	// Format: prefix:number[,prefix:number[,...]]
+	// Each prefix corresponds to a channel type with its limit
+
+	if len(value) == 0 {
+		return
+	}
+
+	// Clear existing limits
+	si.ChannelLimits = make(map[rune]int)
+
+	// Split by comma to get individual limits
+	limits := strings.Split(value, ",")
+	for _, limit := range limits {
+		// Split by colon to separate prefix from number
+		parts := strings.Split(limit, ":")
+		if len(parts) != 2 {
+			continue // Invalid format, skip this entry
+		}
+
+		prefixes := parts[0]
+		numberStr := parts[1]
+
+		// Parse the number
+		number := parseInt(numberStr)
+		if number <= 0 {
+			continue // Invalid number, skip this entry
+		}
+
+		// Apply the limit to all prefixes in the group
+		for _, prefix := range prefixes {
+			si.ChannelLimits[prefix] = number
+		}
 	}
 }
 
