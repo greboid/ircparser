@@ -19,7 +19,7 @@ type ServerInfo struct {
 
 	// Channel and user modes
 	ChannelModes    map[rune]string // mode -> description
-	UserModes       map[rune]string // mode -> description
+	UserModes       map[rune]string // mode -> descriptionw
 	ChannelPrefixes map[rune]rune   // prefix -> mode (e.g., '@' -> 'o')
 
 	// Network info
@@ -36,7 +36,7 @@ type ServerInfo struct {
 }
 
 func NewServerInfo() *ServerInfo {
-	return &ServerInfo{
+	si := &ServerInfo{
 		MaxLineLength:   512,
 		MaxTopicLength:  390,
 		MaxChannels:     10,
@@ -49,6 +49,12 @@ func NewServerInfo() *ServerInfo {
 		Capabilities:    make(map[string]string),
 		CaseMapping:     "ascii",
 	}
+
+	// Set default PREFIX mapping: (ov)@+
+	si.ChannelPrefixes['@'] = 'o' // @ prefix for op mode
+	si.ChannelPrefixes['+'] = 'v' // + prefix for voice mode
+
+	return si
 }
 
 func (si *ServerInfo) SetISupport(key, value string) {
@@ -191,6 +197,9 @@ func (si *ServerInfo) parseChannelPrefixes(value string) {
 	if len(modes) != len(prefixes) {
 		return
 	}
+
+	// Clear existing prefixes and replace with server-provided ones
+	si.ChannelPrefixes = make(map[rune]rune)
 
 	// Map each prefix to its corresponding mode
 	for i := 0; i < len(modes); i++ {

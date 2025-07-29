@@ -9,7 +9,7 @@ import (
 const (
 	DefaultEventChannelBuffer = 100
 	PanicStackBufferSize      = 1024
-	
+
 	CTCPDelimiter = '\x01'
 	MinCTCPLength = 2
 
